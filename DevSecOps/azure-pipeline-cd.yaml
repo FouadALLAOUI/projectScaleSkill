@@ -1,5 +1,5 @@
-name: 'CD_Pipeline_for_Portfolio_App'
-
+name: 'CD_Pipeline_for_ProjectScaleSkill_App'
+  
 trigger: none
 pr: none
 

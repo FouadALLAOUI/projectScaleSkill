@@ -12,7 +12,7 @@ pr: none  # No PR triggers (handled by PR pipeline)
 resources:
   pipelines:
   - pipeline: PR_Pipeline  # Reference to PR pipeline
-    source: PR_Pipeline_for_Portfolio_App  # PR pipeline name
+    source: PR_Pipeline_for_ProjectScaleSkill_App  # PR pipeline name
     trigger: 
       branches:
         include:
