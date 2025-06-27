@@ -14,7 +14,7 @@ pr:
   paths:
     include:
     - '**'  # Include all files for pull request validation.
-  exclude:
+    exclude:
     - '**/DevSecOps/**'  # Exclude DevSecOps folder from pull request validation.
   
 
