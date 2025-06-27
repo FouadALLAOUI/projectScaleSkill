@@ -1,5 +1,10 @@
+# NextJS Continuous Deployment Pipeline
+# This pipeline deploys the application to Azure Web App
+# Triggers only manually or from successful CI pipeline completions
+# Reference: https://docs.microsoft.com/azure/devops/pipelines/languages/javascript
+
 name: 'CD_Pipeline_for_ProjectScaleSkill_App'
-  
+
 trigger: none
 pr: none
 
