@@ -44,7 +44,7 @@ stages:
     - task: AzureRmWebAppDeployment@4
       inputs:
         ConnectionType: 'AzureRM'
-        azureSubscription: 'App-Connection'
+        azureSubscription: '$(AZURE_CONNECTION_NAME)'
         appType: 'webApp'
         WebAppName: '$(AZURE_WEBAPP_NAME)'
         packageForLinux: '$(Pipeline.Workspace)/CI_Pipeline/NextjsBuild/app'
