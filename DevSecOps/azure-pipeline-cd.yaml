@@ -26,13 +26,12 @@ variables:
   - name: AZURE_WEBAPP_NAME
     value: 'scaleskilldev'  # Replace with your Web App name
 
-
 stages:
 - stage: Deploy
   displayName: 'Deploy to Azure Web App'
   jobs:
   - job: DeployToAzure
-    displayName: 'Deploy Docker Image to Azure Web App'
+    displayName: 'Deploy to Azure Web App'
     steps:
 
     # Download build artifacts from CI pipeline
@@ -40,59 +39,175 @@ stages:
       artifact: 'NextjsBuild'
       displayName: 'Download Build Artifacts'
 
-    # Verify artifact contents and size
+    # Verify artifact contents and structure
     - script: |
         echo "##[section]Verifying downloaded artifacts..."
-        du -sh $(Pipeline.Workspace)/CI_Pipeline/NextjsBuild || true
-        echo "##[section]Artifact contents:"
-        find $(Pipeline.Workspace)/CI_Pipeline/NextjsBuild -type f | head -20
-        
-        echo "##[section]Checking for cache files..."
-        find $(Pipeline.Workspace)/CI_Pipeline/NextjsBuild -name "*cache*" -type d || echo "No cache directories found (good!)"
-        find $(Pipeline.Workspace)/CI_Pipeline/NextjsBuild -name "*.pack" || echo "No pack files found (good!)"
-      displayName: 'Verify Artifact Contents'
+        ls -la $(Pipeline.Workspace)/CI_Pipeline/NextjsBuild/
+        echo "##[section]Checking if app directory exists..."
+        if [ -d "$(Pipeline.Workspace)/CI_Pipeline/NextjsBuild/app" ]; then
+          echo "App directory found"
+          ls -la $(Pipeline.Workspace)/CI_Pipeline/NextjsBuild/app/
+        else
+          echo "App directory not found, listing contents:"
+          find $(Pipeline.Workspace)/CI_Pipeline/NextjsBuild -type f | head -20
+        fi
+      displayName: 'Verify Artifact Structure'
 
-    # Clean up Azure Web App storage before deployment
+    # Stop any existing deployment and clear locks
     - task: AzureCLI@2
-      displayName: 'Clean Azure Web App Storage'
+      displayName: 'Prepare Azure Web App for Deployment'
       inputs:
         azureSubscription: '$(AZURE_CONNECTION_NAME)'
         scriptType: 'bash'
         scriptLocation: 'inlineScript'
         inlineScript: |
-          echo "##[section]Cleaning up Azure Web App storage..."
+          echo "##[section]Preparing Azure Web App for deployment..."
           
-          # Remove old cache and temporary files via Kudu API
           WEBAPP_NAME="$(AZURE_WEBAPP_NAME)"
-          PUBLISH_PROFILE=$(az webapp deployment list-publishing-profiles --name $WEBAPP_NAME --resource-group $(az webapp show --name $WEBAPP_NAME --query resourceGroup -o tsv) --xml)
           
-          # Get the SCM URL for cleanup
-          SCM_URL=$(az webapp show --name $WEBAPP_NAME --resource-group $(az webapp show --name $WEBAPP_NAME --query resourceGroup -o tsv) --query "enabledHostNames[?contains(@, '.scm.')]" -o tsv)
+          # Get resource group
+          RG_NAME=$(az webapp show --name $WEBAPP_NAME --query resourceGroup -o tsv)
+          echo "Resource Group: $RG_NAME"
           
-          if [ ! -z "$SCM_URL" ]; then
-            echo "Web App SCM URL found: $SCM_URL"
-            echo "Cleanup will be handled by deployment process"
+          # Stop the web app to clear any locks
+          echo "##[section]Stopping web app to clear deployment locks..."
+          az webapp stop --name $WEBAPP_NAME --resource-group $RG_NAME
+          
+          # Wait a moment for the stop to complete
+          sleep 10
+          
+          # Check deployment status and cancel any ongoing deployments
+          echo "##[section]Checking for ongoing deployments..."
+          DEPLOYMENT_STATUS=$(az webapp deployment list --name $WEBAPP_NAME --resource-group $RG_NAME --query "[0].status" -o tsv 2>/dev/null || echo "none")
+          
+          if [ "$DEPLOYMENT_STATUS" = "Running" ] || [ "$DEPLOYMENT_STATUS" = "Building" ]; then
+            echo "Found ongoing deployment with status: $DEPLOYMENT_STATUS"
+            echo "Waiting for deployment to complete or timeout..."
+            # Wait up to 2 minutes for ongoing deployment to finish
+            for i in {1..24}; do
+              sleep 5
+              CURRENT_STATUS=$(az webapp deployment list --name $WEBAPP_NAME --resource-group $RG_NAME --query "[0].status" -o tsv 2>/dev/null || echo "none")
+              if [ "$CURRENT_STATUS" != "Running" ] && [ "$CURRENT_STATUS" != "Building" ]; then
+                echo "Deployment completed with status: $CURRENT_STATUS"
+                break
+              fi
+              echo "Still waiting... (${i}/24)"
+            done
           else
-            echo "No SCM URL found, proceeding with deployment"
+            echo "No ongoing deployments found"
           fi
           
-          echo "##[section]Storage cleanup preparation completed"
-      continueOnError: true
+          # Start the web app
+          echo "##[section]Starting web app..."
+          az webapp start --name $WEBAPP_NAME --resource-group $RG_NAME
+          
+          echo "##[section]Web app preparation completed"
+      continueOnError: false
 
-    # Deploy to Azure Web App with optimized settings
+    # Determine correct package path
+    - script: |
+        echo "##[section]Determining correct package path..."
+        
+        BASE_PATH="$(Pipeline.Workspace)/CI_Pipeline/NextjsBuild"
+        
+        if [ -d "$BASE_PATH/app" ]; then
+          PACKAGE_PATH="$BASE_PATH/app"
+          echo "Using app subdirectory: $PACKAGE_PATH"
+        elif [ -f "$BASE_PATH/package.json" ]; then
+          PACKAGE_PATH="$BASE_PATH"
+          echo "Using base directory: $PACKAGE_PATH"
+        else
+          echo "##[error]Cannot find valid package structure"
+          exit 1
+        fi
+        
+        echo "##vso[task.setvariable variable=DEPLOYMENT_PACKAGE_PATH]$PACKAGE_PATH"
+        
+        # Verify package contents
+        echo "##[section]Package contents:"
+        ls -la "$PACKAGE_PATH"
+        
+        if [ -f "$PACKAGE_PATH/package.json" ]; then
+          echo "##[section]Package.json found:"
+          cat "$PACKAGE_PATH/package.json" | head -20
+        fi
+      displayName: 'Determine Package Path'
+
+    # Deploy to Azure Web App with retry logic
     - task: AzureRmWebAppDeployment@4
       inputs:
         ConnectionType: 'AzureRM'
         azureSubscription: '$(AZURE_CONNECTION_NAME)'
         appType: 'webApp'
         WebAppName: '$(AZURE_WEBAPP_NAME)'
-        packageForLinux: '$(Pipeline.Workspace)/CI_Pipeline/NextjsBuild/app'
+        packageForLinux: '$(DEPLOYMENT_PACKAGE_PATH)'
         enableCustomDeployment: true
         DeploymentType: 'zipDeploy'
-        RemoveAdditionalFilesFlag: true  # Remove extra files to free up space
-        TakeAppOfflineFlag: true         # Take app offline during deployment
-        StartupCommand: 'cd /home/site/wwwroot && npm install --production --force --legacy-peer-deps && npm start'
-      displayName: 'Deploy to Azure Web App (Optimized)'
+        RemoveAdditionalFilesFlag: true
+        TakeAppOfflineFlag: true
+        RenameFilesFlag: false
+        ExcludeFilesFromAppDataFlag: false
+        AdditionalArguments: '-retryAttempts 3 -retryInterval 10000'
+        StartupCommand: 'npm start'
+      displayName: 'Deploy to Azure Web App (Primary Attempt)'
+      continueOnError: true
+      condition: succeeded()
+
+    # Retry deployment if first attempt failed
+    - task: AzureRmWebAppDeployment@4
+      inputs:
+        ConnectionType: 'AzureRM'
+        azureSubscription: '$(AZURE_CONNECTION_NAME)'
+        appType: 'webApp'
+        WebAppName: '$(AZURE_WEBAPP_NAME)'
+        packageForLinux: '$(DEPLOYMENT_PACKAGE_PATH)'
+        enableCustomDeployment: true
+        DeploymentType: 'zipDeploy'
+        RemoveAdditionalFilesFlag: true
+        TakeAppOfflineFlag: true
+        RenameFilesFlag: false
+        ExcludeFilesFromAppDataFlag: false
+        StartupCommand: 'npm start'
+      displayName: 'Deploy to Azure Web App (Retry Attempt)'
+      condition: failed()
+
+    # Verify deployment success
+    - task: AzureCLI@2
+      displayName: 'Verify Deployment'
+      inputs:
+        azureSubscription: '$(AZURE_CONNECTION_NAME)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "##[section]Verifying deployment..."
+          
+          WEBAPP_NAME="$(AZURE_WEBAPP_NAME)"
+          RG_NAME=$(az webapp show --name $WEBAPP_NAME --query resourceGroup -o tsv)
+          
+          # Get the app URL
+          APP_URL=$(az webapp show --name $WEBAPP_NAME --resource-group $RG_NAME --query "enabledHostNames[0]" -o tsv)
+          echo "##[section]Application URL: https://$APP_URL"
+          
+          # Check app status
+          APP_STATE=$(az webapp show --name $WEBAPP_NAME --resource-group $RG_NAME --query "state" -o tsv)
+          echo "##[section]Application State: $APP_STATE"
+          
+          # Get latest deployment status
+          LATEST_DEPLOYMENT=$(az webapp deployment list --name $WEBAPP_NAME --resource-group $RG_NAME --query "[0]" -o json 2>/dev/null || echo "{}")
+          
+          if [ "$LATEST_DEPLOYMENT" != "{}" ]; then
+            DEPLOYMENT_STATUS=$(echo $LATEST_DEPLOYMENT | jq -r '.status // "unknown"')
+            DEPLOYMENT_ID=$(echo $LATEST_DEPLOYMENT | jq -r '.id // "unknown"')
+            echo "##[section]Latest Deployment Status: $DEPLOYMENT_STATUS"
+            echo "##[section]Deployment ID: $DEPLOYMENT_ID"
+          fi
+          
+          if [ "$APP_STATE" = "Running" ]; then
+            echo "##[section]✅ Deployment verification successful!"
+          else
+            echo "##[warning]⚠️ App is not in Running state. Current state: $APP_STATE"
+          fi
+      continueOnError: true
 
     # Download the image tag artifact from CI pipeline
     #- download: CI_Pipeline
