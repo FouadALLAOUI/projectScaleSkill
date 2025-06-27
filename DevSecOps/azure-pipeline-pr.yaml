@@ -11,6 +11,12 @@ pr:
   branches:
     include:
     - '*'  # Include all branches for pull request validation.
+  paths:
+    include:
+    - '**'  # Include all files for pull request validation.
+  exclude:
+    - '**/DevSecOps/**'  # Exclude DevSecOps folder from pull request validation.
+  
 
 variables:
   # Node.js version to match the project's requirements (see package.json engines)
