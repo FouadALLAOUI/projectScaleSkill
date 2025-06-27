@@ -1,0 +1,70 @@
+name: 'CD_Pipeline_for_Portfolio_App'
+
+trigger: none
+pr: none
+
+resources:
+  pipelines:
+  - pipeline: CI_Pipeline  # Reference to CI pipeline
+    source: CI_Pipeline_for_ProjectScaleSkill_App  # CI pipeline name
+    trigger: 
+      branches:
+        include:
+          - main  # Or your target branch
+
+pool:
+  name: PoolRunners
+
+variables:
+  - name: AZURE_WEBAPP_NAME
+    value: 'webapp_projectscaleskill'  # Replace with your Web App name
+
+
+stages:
+- stage: Deploy
+  displayName: 'Deploy to Azure Web App'
+  jobs:
+  - job: DeployToAzure
+    displayName: 'Deploy Docker Image to Azure Web App'
+    steps:
+
+    # Download build artifacts from CI pipeline
+    - download: CI_Pipeline
+      artifact: 'NextjsBuild'
+      displayName: 'Download Build Artifacts'
+
+    # Deploy to Azure Web App
+    - task: AzureRmWebAppDeployment@4
+      inputs:
+        ConnectionType: 'AzureRM'
+        azureSubscription: 'App-Connection'
+        appType: 'webApp'
+        WebAppName: '$(AZURE_WEBAPP_NAME)'
+        packageForLinux: '$(Pipeline.Workspace)/CI_Pipeline/NextjsBuild/app'
+        enableCustomDeployment: true
+        DeploymentType: 'zipDeploy'
+        StartupCommand: 'cd /home/site/wwwroot && npm install --force --legacy-peer-deps && npm start'
+
+    # Download the image tag artifact from CI pipeline
+    #- download: CI_Pipeline
+    #  artifact: 'ImageTag'
+    #  displayName: 'Download Image Tag'
+
+    # Read the image tag from the file
+    #- task: Bash@3
+    #  displayName: 'Set Image Tag Variable'
+    #  inputs:
+    #    targetType: 'inline'
+    #    script: |
+    #      IMAGE_TAG=$(cat $(Pipeline.Workspace)/CI_Pipeline/ImageTag/imageTag.txt)
+    #      echo "##vso[task.setvariable variable=DOCKER_IMAGE_TAG]$IMAGE_TAG"
+    #      echo $(DOCKER_IMAGE_TAG)
+
+    # Deploy to Azure Web App
+    #- task: AzureWebAppContainer@1
+    #  displayName: 'Deploy to Azure Web App'
+    #  inputs:
+    #    azureSubscription: 'WebAppService'  # Your Azure service connection name
+    #    appName: '$(AZURE_WEBAPP_NAME)'
+    #    containers: '$(DOCKERHUB_USER)/$(IMAGE_NAME):$(DOCKER_IMAGE_TAG)'
+        

@@ -1,0 +1,103 @@
+# Node.js Pipeline for NextJS Application
+# This pipeline validates pull requests by installing dependencies, linting, building, 
+# and performing security audits on the codebase.
+# Reference: https://docs.microsoft.com/azure/devops/pipelines/languages/javascript
+
+name: 'PR_Pipeline_for_ProjectScaleSkill_App'
+
+#trigger: none  # This pipeline is only triggered by pull requests, not direct commits.
+
+pr:
+  branches:
+    include:
+    - '*'  # Include all branches for pull request validation.
+
+variables:
+  # Node.js version to match the project's requirements (see package.json engines)
+  NODE_VERSION: '18.x'  
+  # Control the verbosity level of npm output (info, verbose, silly)
+  NPM_VERBOSITY: 'verbose'
+  # Npm cache directory to improve build performance and enable cache clearing
+  NPM_CACHE_FOLDER: $(Pipeline.Workspace)/.npm
+
+pool:
+  name: PoolRunners  # Specify the agent pool to run the jobs.
+
+stages:
+- stage: validation
+  displayName: 'PR Validation'  # User-friendly name for the validation stage.
+  jobs:
+  - job: Install_Build_Lint  
+    displayName: 'Code Quality & Build Validation'
+    steps:
+    # Step 1: Setup environment with required Node.js version
+    - task: NodeTool@0
+      inputs:
+        versionSpec: $(NODE_VERSION)
+      displayName: 'Setup Node.js Environment'
+    
+    # Step 2: Verify environment and clear npm cache if needed
+    - script: |
+        echo "##[section]Diagnosing environment..."
+        echo "Node version: $(node --version)"
+        echo "Npm version: $(npm --version)"
+        echo "OS information: $(uname -a)"
+        
+        echo "##[section]Clearing npm cache..."
+        npm cache clean --force
+        
+        echo "##[section]Verifying package.json..."
+        cat package.json
+      displayName: 'Verify Environment and Clean Cache'
+    
+    # Step 3: Install all project dependencies 
+    - script: |
+        echo "##[section]Installing dependencies..."
+        # Using legacy-peer-deps to handle dependency conflicts between react-three packages
+        npm install --legacy-peer-deps
+      displayName: 'Install Dependencies'
+    
+    # Step 4: Run linting to ensure code quality standards
+    - script: |
+        echo "##[section]Running code linting..."
+        npm run lint --force -- --fix || echo "Linting issues found, but continuing pipeline"
+      displayName: 'Static Code Analysis (Linting)'
+      continueOnError: true  # Allow pipeline to continue even if linting issues are found
+    
+    # Step 5: Build the application to validate compilation
+    - script: |
+        echo "##[section]Building application..."
+        # Use --legacy-peer-deps for build as well to maintain consistency
+        npm run build --legacy-peer-deps
+      displayName: 'Build Application'
+    
+    # Step 6: Security vulnerability scanning - basic
+    - script: |
+        echo "##[section]Running basic security audit..."
+        npm audit --production || echo "Security issues found, but continuing pipeline"
+      displayName: 'Basic Security Audit'
+      continueOnError: true  # Allow pipeline to continue even if vulnerabilities are found
+      
+    # Step 7: Enhanced security scanning with detailed report
+    - script: |
+        echo "##[section]Running enhanced security scanning..."
+        npm audit --production --json > $(Build.ArtifactStagingDirectory)/npm-audit.json || true
+        echo "##[section]Summary of security findings:"
+        npm audit --production --audit-level=moderate || echo "Security issues found, but continuing pipeline"
+        
+        # Check if audit found any issues and report them
+        if [ -f "$(Build.ArtifactStagingDirectory)/npm-audit.json" ]; then
+          echo "##[section]Saving security audit report as pipeline artifact..."
+        fi
+      displayName: 'Comprehensive Security Analysis'
+      continueOnError: true  # Continue pipeline but capture results for review
+    
+    # Step 8: Publish security reports as artifacts
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathtoPublish: $(Build.ArtifactStagingDirectory)
+        artifactName: 'SecurityReports'
+        publishLocation: 'Container'
+      displayName: 'Publish Security Reports'
+      condition: succeededOrFailed()  # Run even if previous steps failed
+

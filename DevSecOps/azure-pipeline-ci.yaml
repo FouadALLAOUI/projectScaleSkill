@@ -1,0 +1,223 @@
+# NextJS Continuous Integration Pipeline
+# This pipeline builds, tests, and packages the application for deployment
+# Triggers only manually or from successful PR pipeline completions
+# Reference: https://docs.microsoft.com/azure/devops/pipelines/languages/javascript
+
+name: 'CI_Pipeline_for_ProjectScaleSkill_App'
+
+trigger: none  # No direct commit triggers
+pr: none  # No PR triggers (handled by PR pipeline)
+
+# Pipeline resource dependency - only run after successful PR pipeline completion
+resources:
+  pipelines:
+  - pipeline: PR_Pipeline  # Reference to PR pipeline
+    source: PR_Pipeline_for_Portfolio_App  # PR pipeline name
+    trigger: 
+      branches:
+        include:
+          - main  # Only trigger on successful PR merges to master
+
+# Agent pool configuration
+pool:
+  name: PoolRunners  # Specify the pool of agents to run the jobs
+
+# Global variables for the pipeline
+variables:
+  # Docker image configuration
+  IMAGE_NAME: 'portfolio'
+  ACR_NAME: 'acrnostrad'
+  DOCKER_IMAGE_TAG: $(Build.BuildID)
+  REGISTRY_NAME: 'acrnostrad'
+  # Node.js configuration - updated to match package.json requirements
+  NODE_VERSION: '18.x'
+  # Control npm output level (silent, error, warn, notice, http, timing, info, verbose, silly)
+  NPM_VERBOSITY: 'verbose'
+  # Npm cache directory to improve build performance and enable cache clearing
+  NPM_CACHE_FOLDER: $(Pipeline.Workspace)/.npm
+
+# Pipeline stages
+stages:
+# STAGE 1: Validate and build the application
+- stage: validation
+  displayName: 'Application Validation & Build'
+  jobs:
+  - job: BuildAndPackage
+    displayName: 'Build and Package NextJS Application'
+    steps:
+    # Step 1: Setup Node.js environment
+    - task: NodeTool@0
+      inputs:
+        versionSpec: $(NODE_VERSION)
+      displayName: 'Setup Node.js Environment'
+    
+    # Step 2: Verify environment and clear npm cache if needed
+    - script: |
+        echo "##[section]Diagnosing environment..."
+        echo "Node version: $(node --version)"
+        echo "Npm version: $(npm --version)"
+        echo "OS information: $(uname -a)"
+        
+        echo "##[section]Clearing npm cache..."
+        npm cache clean --force
+        
+        echo "##[section]Verifying package.json..."
+        cat package.json
+      displayName: 'Verify Environment and Clean Cache'
+    
+    # Step 3: Install dependencies with robust error handling
+    - script: |
+        echo "##[section]Installing dependencies..."
+        # Using legacy-peer-deps to handle dependency conflicts between react-three packages
+        npm install --legacy-peer-deps
+      displayName: 'Install Dependencies'
+    
+    # Step 4: Run linting with auto-fix and continue on error
+    - script: |
+        echo "##[section]Running code quality checks..."
+        npm run lint --force -- --fix || echo "Linting issues found, but continuing pipeline"
+      displayName: 'Static Code Analysis'
+      continueOnError: true  # Allow pipeline to continue even if linting issues are found
+    
+    # Step 5: Security vulnerability scanning
+    - script: |
+        echo "##[section]Running security audit..."
+        npm audit --production || echo "Security issues found, but continuing pipeline"
+      displayName: 'Security Vulnerability Scan'
+      continueOnError: true  # Allow pipeline to continue even if vulnerabilities are found
+    
+    # Step 6: Build application and prepare deployment package
+    - script: |
+        echo "##[section]Building application..."
+        # Use --legacy-peer-deps for build as well to maintain consistency
+        npm run build --legacy-peer-deps
+        
+        echo "##[section]Creating deployment package..."
+        mkdir -p $(Build.ArtifactStagingDirectory)/app
+        cp -R .next $(Build.ArtifactStagingDirectory)/app/
+        cp package*.json $(Build.ArtifactStagingDirectory)/app/
+        cp -R public $(Build.ArtifactStagingDirectory)/app/
+        echo "Deployment package created successfully."
+      displayName: 'Build and Package Application'
+
+    # Step 7: Publish build artifacts
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathToPublish: $(Build.ArtifactStagingDirectory)
+        artifactName: 'NextjsBuild'
+        publishLocation: 'Container'
+      displayName: 'Publish Build Artifacts'
+      
+    # Step 8: Publish security reports as artifacts
+    - script: |
+        echo "##[section]Running enhanced security scanning..."
+        npm audit --production --json > $(Build.ArtifactStagingDirectory)/npm-audit.json || true
+        echo "##[section]Summary of security findings:"
+        npm audit --production --audit-level=moderate || echo "Security issues found, but continuing pipeline"
+      displayName: 'Comprehensive Security Analysis'
+      continueOnError: true
+      
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathToPublish: $(Build.ArtifactStagingDirectory)
+        artifactName: 'SecurityReports'
+        publishLocation: 'Container'
+      displayName: 'Publish Security Reports'
+      condition: succeededOrFailed()  # Run even if previous steps failed
+
+# STAGE 2: Docker Image Build and Push (commented out but preserved for future use)
+#- stage: DockerBuildAndPush
+#  displayName: 'Docker Image Build & Publish'
+#  dependsOn: validation
+#  jobs:
+#  - job: BuildAndPushImage
+#    displayName: 'Build and Push Docker Image'
+#    steps:
+#    # Step 1: Build Docker image
+#    - script: |
+#        echo "##[section]Building Docker image..."
+#        docker build --no-cache -t $(IMAGE_NAME):$(DOCKER_IMAGE_TAG) .
+#      displayName: 'Build Docker Image'
+#
+#    # Step 2: Verify image creation
+#    - script: |
+#        echo "##[section]Verifying Docker images..."
+#        docker images
+#      displayName: 'List Available Docker Images'
+#
+#    # Step 3: Tag images for DockerHub
+#    - script: |
+#        echo "##[section]Tagging Docker image for DockerHub..."
+#        docker tag $(IMAGE_NAME):$(DOCKER_IMAGE_TAG) $(DOCKERHUB_USER)/$(IMAGE_NAME):$(DOCKER_IMAGE_TAG)
+#        docker tag $(IMAGE_NAME):$(DOCKER_IMAGE_TAG) $(DOCKERHUB_USER)/$(IMAGE_NAME):latest
+#      displayName: 'Tag Docker Images'
+#
+#    # Step 4: Verify tagged images
+#    - script: |
+#        echo "##[section]Verifying tagged images..."
+#        docker images
+#      displayName: 'List Tagged Docker Images'
+#
+#    # Step 5: Push versioned image to DockerHub
+#    - task: Docker@2
+#      displayName: 'Push Versioned Image to DockerHub'
+#      inputs:
+#        containerRegistry: 'DockerHub'
+#        repository: '$(DOCKERHUB_USER)/$(IMAGE_NAME)'
+#        command: 'push'
+#        tags: |
+#          $(DOCKER_IMAGE_TAG)
+#
+#    # Step 6: Push latest image to DockerHub
+#    - task: Docker@2
+#      displayName: 'Push Latest Image to DockerHub'
+#      inputs:
+#        containerRegistry: 'DockerHub'
+#        repository: '$(DOCKERHUB_USER)/$(IMAGE_NAME)'
+#        command: 'push'
+#        tags: |
+#          latest
+#
+#    # Step 7: Clean up local images
+#    - script: |
+#        echo "##[section]Cleaning up local images..."
+#        docker rmi -f $(IMAGE_NAME):$(DOCKER_IMAGE_TAG) || echo "No images to remove."
+#      displayName: 'Clean Up Local Images'
+#
+#    # Step 8: Success notification
+#    - script: |
+#        echo "##[section]Docker image successfully built and pushed."
+#        echo "Image: $(DOCKERHUB_USER)/$(IMAGE_NAME):$(DOCKER_IMAGE_TAG)"
+#      displayName: 'Deployment Summary'
+#
+#  - job: CleanDockerCache
+#    dependsOn: BuildAndPushImage
+#    displayName: 'Docker System Maintenance'
+#    steps:
+#    - script: |
+#        echo "##[section]Docker system status before cleanup..."
+#        docker system df
+#
+#        echo "##[section]Cleaning Docker system..."
+#        docker system prune -a -f
+#        docker image prune -a -f
+#        
+#        echo "##[section]Docker system status after cleanup..."
+#        docker system df
+#      displayName: 'Purge Docker Cache'
+#
+#  - job: PublishImageMetadata
+#    dependsOn: CleanDockerCache
+#    displayName: 'Publish Deployment Metadata'
+#    steps:
+#    - script: |
+#        echo "##[section]Saving deployment metadata..."
+#        echo $(DOCKER_IMAGE_TAG) > $(Build.ArtifactStagingDirectory)/imageTag.txt
+#      displayName: 'Generate Deployment Metadata'
+#
+#    - task: PublishBuildArtifacts@1
+#      inputs:
+#        pathToPublish: $(Build.ArtifactStagingDirectory)
+#        artifactName: 'DeploymentMetadata'
+#      displayName: 'Publish Deployment Metadata'
+
