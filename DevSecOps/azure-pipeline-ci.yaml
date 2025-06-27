@@ -113,13 +113,67 @@ stages:
         # Use --legacy-peer-deps for build as well to maintain consistency
         npm run build --legacy-peer-deps
         
-        echo "##[section]Creating deployment package..."
+        echo "##[section]Creating optimized deployment package..."
         mkdir -p $(Build.ArtifactStagingDirectory)/app
-        cp -R .next $(Build.ArtifactStagingDirectory)/app/
+        
+        # Copy only essential Next.js build files (exclude cache)
+        cp -R .next/static $(Build.ArtifactStagingDirectory)/app/.next/
+        cp -R .next/server $(Build.ArtifactStagingDirectory)/app/.next/
+        cp .next/BUILD_ID $(Build.ArtifactStagingDirectory)/app/.next/ 2>/dev/null || true
+        cp .next/export-marker.json $(Build.ArtifactStagingDirectory)/app/.next/ 2>/dev/null || true
+        cp .next/package.json $(Build.ArtifactStagingDirectory)/app/.next/ 2>/dev/null || true
+        cp .next/prerender-manifest.json $(Build.ArtifactStagingDirectory)/app/.next/ 2>/dev/null || true
+        cp .next/routes-manifest.json $(Build.ArtifactStagingDirectory)/app/.next/ 2>/dev/null || true
+        cp .next/images-manifest.json $(Build.ArtifactStagingDirectory)/app/.next/ 2>/dev/null || true
+        
+        # Copy package files and public directory
         cp package*.json $(Build.ArtifactStagingDirectory)/app/
-        cp -R public $(Build.ArtifactStagingDirectory)/app/
-        echo "Deployment package created successfully."
+        cp -R public $(Build.ArtifactStagingDirectory)/app/ 2>/dev/null || true
+        
+        # Create next.config.js if it exists
+        cp next.config.js $(Build.ArtifactStagingDirectory)/app/ 2>/dev/null || true
+        
+        echo "##[section]Verifying deployment package size..."
+        du -sh $(Build.ArtifactStagingDirectory)/app || true
+        echo "##[section]Package contents:"
+        find $(Build.ArtifactStagingDirectory)/app -type f | head -20
+        echo "Optimized deployment package created successfully."
       displayName: 'Build and Package Application'
+
+    # Additional verification to ensure no cache files are included
+    - script: |
+        echo "##[section]Final package verification..."
+        
+        # Check total package size
+        PACKAGE_SIZE=$(du -sh $(Build.ArtifactStagingDirectory)/app | cut -f1)
+        echo "Total package size: $PACKAGE_SIZE"
+        
+        # Verify no cache directories exist
+        CACHE_COUNT=$(find $(Build.ArtifactStagingDirectory)/app -name "*cache*" -type d | wc -l)
+        if [ $CACHE_COUNT -gt 0 ]; then
+          echo "##[error]ERROR: Cache directories found in deployment package!"
+          find $(Build.ArtifactStagingDirectory)/app -name "*cache*" -type d
+          exit 1
+        else
+          echo "✓ No cache directories found in deployment package"
+        fi
+        
+        # Verify no .pack files exist (webpack cache files)
+        PACK_COUNT=$(find $(Build.ArtifactStagingDirectory)/app -name "*.pack" | wc -l)
+        if [ $PACK_COUNT -gt 0 ]; then
+          echo "##[error]ERROR: Webpack pack files found in deployment package!"
+          find $(Build.ArtifactStagingDirectory)/app -name "*.pack"
+          exit 1
+        else
+          echo "✓ No webpack pack files found in deployment package"
+        fi
+        
+        # Show final directory structure
+        echo "##[section]Final deployment package structure:"
+        tree $(Build.ArtifactStagingDirectory)/app -L 3 2>/dev/null || find $(Build.ArtifactStagingDirectory)/app -type d | head -15
+        
+        echo "##[section]✓ Package verification completed successfully"
+      displayName: 'Verify Package Contents and Size'
 
     # Step 7: Publish build artifacts
     - task: PublishBuildArtifacts@1

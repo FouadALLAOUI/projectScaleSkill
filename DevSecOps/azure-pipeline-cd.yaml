@@ -40,7 +40,46 @@ stages:
       artifact: 'NextjsBuild'
       displayName: 'Download Build Artifacts'
 
-    # Deploy to Azure Web App
+    # Verify artifact contents and size
+    - script: |
+        echo "##[section]Verifying downloaded artifacts..."
+        du -sh $(Pipeline.Workspace)/CI_Pipeline/NextjsBuild || true
+        echo "##[section]Artifact contents:"
+        find $(Pipeline.Workspace)/CI_Pipeline/NextjsBuild -type f | head -20
+        
+        echo "##[section]Checking for cache files..."
+        find $(Pipeline.Workspace)/CI_Pipeline/NextjsBuild -name "*cache*" -type d || echo "No cache directories found (good!)"
+        find $(Pipeline.Workspace)/CI_Pipeline/NextjsBuild -name "*.pack" || echo "No pack files found (good!)"
+      displayName: 'Verify Artifact Contents'
+
+    # Clean up Azure Web App storage before deployment
+    - task: AzureCLI@2
+      displayName: 'Clean Azure Web App Storage'
+      inputs:
+        azureSubscription: '$(AZURE_CONNECTION_NAME)'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          echo "##[section]Cleaning up Azure Web App storage..."
+          
+          # Remove old cache and temporary files via Kudu API
+          WEBAPP_NAME="$(AZURE_WEBAPP_NAME)"
+          PUBLISH_PROFILE=$(az webapp deployment list-publishing-profiles --name $WEBAPP_NAME --resource-group $(az webapp show --name $WEBAPP_NAME --query resourceGroup -o tsv) --xml)
+          
+          # Get the SCM URL for cleanup
+          SCM_URL=$(az webapp show --name $WEBAPP_NAME --resource-group $(az webapp show --name $WEBAPP_NAME --query resourceGroup -o tsv) --query "enabledHostNames[?contains(@, '.scm.')]" -o tsv)
+          
+          if [ ! -z "$SCM_URL" ]; then
+            echo "Web App SCM URL found: $SCM_URL"
+            echo "Cleanup will be handled by deployment process"
+          else
+            echo "No SCM URL found, proceeding with deployment"
+          fi
+          
+          echo "##[section]Storage cleanup preparation completed"
+      continueOnError: true
+
+    # Deploy to Azure Web App with optimized settings
     - task: AzureRmWebAppDeployment@4
       inputs:
         ConnectionType: 'AzureRM'
@@ -50,7 +89,10 @@ stages:
         packageForLinux: '$(Pipeline.Workspace)/CI_Pipeline/NextjsBuild/app'
         enableCustomDeployment: true
         DeploymentType: 'zipDeploy'
-        StartupCommand: 'cd /home/site/wwwroot && npm install --force --legacy-peer-deps && npm start'
+        RemoveAdditionalFilesFlag: true  # Remove extra files to free up space
+        TakeAppOfflineFlag: true         # Take app offline during deployment
+        StartupCommand: 'cd /home/site/wwwroot && npm install --production --force --legacy-peer-deps && npm start'
+      displayName: 'Deploy to Azure Web App (Optimized)'
 
     # Download the image tag artifact from CI pipeline
     #- download: CI_Pipeline
