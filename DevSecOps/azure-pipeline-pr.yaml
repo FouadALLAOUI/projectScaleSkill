@@ -63,8 +63,29 @@ stages:
         npm run lint --force -- --fix || echo "Linting issues found, but continuing pipeline"
       displayName: 'Static Code Analysis (Linting)'
       continueOnError: true  # Allow pipeline to continue even if linting issues are found
+
+    # Step 5: Run unit tests
+    - script: |
+        echo "##[section]Running unit tests..."
+        npm run test
+      displayName: 'Unit Tests'
+      continueOnError: true  # Allow pipeline to continue even if tests fail
+
+    # Step 6: Linting with ESLint
+    - script: |
+        echo "##[section]Running ESLint..."
+        npm run lint
+      displayName: 'ESLint'
+      continueOnError: true  # Allow pipeline to continue even if linting issues are found
+
+    # Step 7: Formatting with Prettier
+    - script: |
+        echo "##[section]Running Prettier..."
+        npm run format
+      displayName: 'Prettier'
+      continueOnError: true  # Allow pipeline to continue even if formatting issues are found
     
-    # Step 5: Build the application to validate compilation
+    # Step 8: Build the application to validate compilation
     - script: |
         echo "##[section]Building application..."
         # Use --legacy-peer-deps for build as well to maintain consistency
