@@ -21,8 +21,10 @@ pool:
   name: PoolRunners
 
 variables:
+  - name: AZURE_CONNECTION_NAME
+    value: 'DevAppScaleSkill-ServiceConnection'
   - name: AZURE_WEBAPP_NAME
-    value: 'webapp_projectscaleskill'  # Replace with your Web App name
+    value: 'scaleskilldev'  # Replace with your Web App name
 
 
 stages:
