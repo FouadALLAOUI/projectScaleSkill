@@ -1,13 +1,15 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'export',
+  trailingSlash: true,
   eslint: {
     ignoreDuringBuilds: true,
   },
   images: { unoptimized: true },
   // Optimize for production deployment
   experimental: {
-    optimizeCss: true,
+    // Disable CSS optimization for static export to prevent build issues
+    optimizeCss: false,
   },
   // Reduce bundle size
   compress: true,
