@@ -25,10 +25,10 @@ pool:
 # Global variables for the pipeline
 variables:
   # Docker image configuration
-  IMAGE_NAME: 'portfolio'
-  ACR_NAME: 'acrnostrad'
+  IMAGE_NAME: 'projectscaleskill'
+  ACR_NAME: 'acrprojectscaleskill'
   DOCKER_IMAGE_TAG: $(Build.BuildID)
-  REGISTRY_NAME: 'acrnostrad'
+  REGISTRY_NAME: 'acrprojectscaleskill'
   # Node.js configuration - updated to match package.json requirements
   NODE_VERSION: '18.x'
   # Control npm output level (silent, error, warn, notice, http, timing, info, verbose, silly)
@@ -85,8 +85,29 @@ stages:
         npm audit --production || echo "Security issues found, but continuing pipeline"
       displayName: 'Security Vulnerability Scan'
       continueOnError: true  # Allow pipeline to continue even if vulnerabilities are found
-    
-    # Step 6: Build application and prepare deployment package
+
+    # Step 6: Run unit tests
+    - script: |
+        echo "##[section]Running unit tests..."
+        npm run test
+      displayName: 'Unit Tests'
+      continueOnError: true  # Allow pipeline to continue even if tests fail
+
+    # Step 7: Linting with ESLint
+    - script: |
+        echo "##[section]Running ESLint..."
+        npm run lint
+      displayName: 'ESLint'
+      continueOnError: true  # Allow pipeline to continue even if linting issues are found
+
+    # Step 8: Formatting with Prettier
+    - script: |
+        echo "##[section]Running Prettier..."
+        npm run format
+      displayName: 'Prettier'
+      continueOnError: true  # Allow pipeline to continue even if formatting issues are found
+
+    # Step 9: Build application and prepare deployment package
     - script: |
         echo "##[section]Building application..."
         # Use --legacy-peer-deps for build as well to maintain consistency

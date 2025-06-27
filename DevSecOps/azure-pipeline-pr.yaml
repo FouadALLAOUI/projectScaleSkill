@@ -34,7 +34,7 @@ stages:
   displayName: 'PR Validation'  # User-friendly name for the validation stage.
   jobs:
   - job: Install_Build_Lint  
-    displayName: 'Code Quality & Build Validation'
+    displayName: 'Build and Test Validation'
     steps:
     # Step 1: Setup environment with required Node.js version
     - task: NodeTool@0
