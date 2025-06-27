@@ -26,8 +26,8 @@ variables:
   # Npm cache directory to improve build performance and enable cache clearing
   NPM_CACHE_FOLDER: $(Pipeline.Workspace)/.npm
 
-pool:
-  name: PoolRunners  # Specify the agent pool to run the jobs.
+vmImage: 'ubuntu-latest'
+
 
 stages:
 - stage: validation
