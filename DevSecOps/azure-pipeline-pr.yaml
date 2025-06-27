@@ -27,7 +27,7 @@ variables:
   NPM_CACHE_FOLDER: $(Pipeline.Workspace)/.npm
 
 pool:
-  vmImage: 'ubuntu-latest'
+  name: PoolRunners  # Specify the agent pool to run the jobs.
 
 stages:
 - stage: validation
