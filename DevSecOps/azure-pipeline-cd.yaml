@@ -8,14 +8,14 @@ name: 'CD_Pipeline_for_ProjectScaleSkill_App'
 trigger: none
 pr: none
 
-resources:
-  pipelines:
-  - pipeline: CI_Pipeline  # Reference to CI pipeline
-    source: CI_Pipeline_for_ProjectScaleSkill_App  # CI pipeline name
-    trigger: 
-      branches:
-        include:
-          - main  # Or your target branch
+#resources:
+#  pipelines:
+#  - pipeline: CI_Pipeline  # Reference to CI pipeline
+#    source: CI_Pipeline_for_ProjectScaleSkill_App  # CI pipeline name
+#    trigger: 
+#      branches:
+#        include:
+#          - main  # Or your target branch
 
 pool:
   name: PoolRunners

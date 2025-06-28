@@ -9,14 +9,14 @@ trigger: none  # No direct commit triggers
 pr: none  # No PR triggers (handled by PR pipeline)
 
 # Pipeline resource dependency - only run after successful PR pipeline completion
-resources:
-  pipelines:
-  - pipeline: PR_Pipeline  # Reference to PR pipeline
-    source: PR_Pipeline_for_ProjectScaleSkill_App  # PR pipeline name
-    trigger: 
-      branches:
-        include:
-          - main  # Only trigger on successful PR merges to master
+#resources:
+#  pipelines:
+#  - pipeline: PR_Pipeline  # Reference to PR pipeline
+#    source: PR_Pipeline_for_ProjectScaleSkill_App  # PR pipeline name
+#    trigger: 
+#      branches:
+#        include:
+#          - main  # Only trigger on successful PR merges to master
 
 # Agent pool configuration
 pool:
