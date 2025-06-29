@@ -289,32 +289,128 @@ stages:
 
     # Install and run Semgrep for advanced static analysis
     - script: |
-        echo "##[section]Installing and running Semgrep..."
-        python3 -m pip install semgrep || echo "Failed to install semgrep"
+        echo "##[section]Installing Semgrep with multiple fallback methods..."
         
-        # Run Semgrep with JavaScript/TypeScript rulesets
-        semgrep --config=auto --json --output=$(Build.ArtifactStagingDirectory)/semgrep-report.json . || true
-        semgrep --config=p/javascript --config=p/typescript --config=p/react --config=p/nextjs . || echo "Semgrep analysis completed with findings"
+        # Method 1: Try to install pip if not available
+        if ! python3 -m pip --version > /dev/null 2>&1; then
+          echo "Pip not found, attempting to install pip..."
+          curl -s https://bootstrap.pypa.io/get-pip.py | python3 || echo "Failed to install pip via curl"
+          
+          # Try apt-get for Ubuntu/Debian systems
+          sudo apt-get update > /dev/null 2>&1 && sudo apt-get install -y python3-pip > /dev/null 2>&1 || echo "Failed to install pip via apt-get"
+          
+          # Try yum for CentOS/RHEL systems
+          sudo yum install -y python3-pip > /dev/null 2>&1 || echo "Failed to install pip via yum"
+        fi
+        
+        # Method 2: Try installing Semgrep via pip
+        if python3 -m pip --version > /dev/null 2>&1; then
+          echo "Installing Semgrep via pip..."
+          python3 -m pip install semgrep --user || echo "Failed to install semgrep via pip"
+        fi
+        
+        # Method 3: Try installing via direct script download if pip failed
+        if ! command -v semgrep > /dev/null 2>&1; then
+          echo "Attempting direct Semgrep installation..."
+          curl -fsSL https://semgrep.dev/install | bash || echo "Failed to install semgrep via direct script"
+        fi
+        
+        # Method 4: Try npm package as fallback
+        if ! command -v semgrep > /dev/null 2>&1; then
+          echo "Attempting Semgrep installation via npm..."
+          npm install -g @semgrep/cli || echo "Failed to install semgrep via npm"
+        fi
+        
+        # Check if Semgrep is now available
+        if command -v semgrep > /dev/null 2>&1; then
+          echo "##[section]Semgrep successfully installed, running analysis..."
+          semgrep --version
+          
+          # Run Semgrep with JavaScript/TypeScript rulesets
+          echo "##[section]Running Semgrep auto-detection scan..."
+          semgrep --config=auto --json --output=$(Build.ArtifactStagingDirectory)/semgrep-report.json . || true
+          
+          echo "##[section]Running Semgrep with specific rulesets..."
+          semgrep --config=p/javascript --config=p/typescript --config=p/react --config=p/nextjs . || echo "Semgrep analysis completed with findings"
+          
+          echo "##[section]Running additional security-focused Semgrep rules..."
+          semgrep --config=p/security-audit --config=p/secrets . || echo "Security audit completed"
+        else
+          echo "##[warning]Semgrep installation failed with all methods. Skipping Semgrep analysis."
+          echo "Available package managers and tools:"
+          command -v python3 && python3 --version || echo "Python3 not found"
+          command -v pip && pip --version || echo "pip not found"
+          command -v pip3 && pip3 --version || echo "pip3 not found"
+          command -v npm && npm --version || echo "npm not found"
+          command -v curl && curl --version | head -1 || echo "curl not found"
+          echo "{\"error\": \"Semgrep not available\"}" > $(Build.ArtifactStagingDirectory)/semgrep-report.json
+        fi
       displayName: 'Semgrep Static Analysis'
       continueOnError: true
 
     # Run njsscan for Node.js specific security analysis
     - script: |
-        echo "##[section]Installing and running njsscan..."
-        python3 -m pip install njsscan || echo "Failed to install njsscan"
+        echo "##[section]Installing njsscan for Node.js security analysis..."
         
-        njsscan --json --output $(Build.ArtifactStagingDirectory)/njsscan-report.json . || true
-        njsscan . || echo "njsscan analysis completed with findings"
+        # Try installing njsscan via pip
+        if python3 -m pip --version > /dev/null 2>&1; then
+          echo "Installing njsscan via pip..."
+          python3 -m pip install njsscan --user || echo "Failed to install njsscan via pip"
+        elif command -v pip3 > /dev/null 2>&1; then
+          echo "Installing njsscan via pip3..."
+          pip3 install njsscan --user || echo "Failed to install njsscan via pip3"
+        elif command -v pip > /dev/null 2>&1; then
+          echo "Installing njsscan via pip..."
+          pip install njsscan --user || echo "Failed to install njsscan via pip"
+        else
+          echo "No pip found, attempting alternative installation..."
+          curl -s https://bootstrap.pypa.io/get-pip.py | python3 || echo "Failed to install pip"
+          python3 -m pip install njsscan --user || echo "Failed to install njsscan"
+        fi
+        
+        # Check if njsscan is available and run analysis
+        if command -v njsscan > /dev/null 2>&1; then
+          echo "##[section]Running njsscan analysis..."
+          njsscan --version || echo "njsscan version check failed"
+          njsscan --json --output $(Build.ArtifactStagingDirectory)/njsscan-report.json . || true
+          njsscan . || echo "njsscan analysis completed with findings"
+        else
+          echo "##[warning]njsscan installation failed. Skipping njsscan analysis."
+          echo "{\"error\": \"njsscan not available\"}" > $(Build.ArtifactStagingDirectory)/njsscan-report.json
+        fi
       displayName: 'njsscan Node.js Security Analysis'
       continueOnError: true
 
     # Secret detection with TruffleHog
     - script: |
-        echo "##[section]Installing and running TruffleHog for secret detection..."
-        python3 -m pip install truffleHog || echo "Failed to install truffleHog"
+        echo "##[section]Installing TruffleHog for secret detection..."
         
-        trufflehog --json --output $(Build.ArtifactStagingDirectory)/trufflehog-report.json . || true
-        trufflehog . || echo "TruffleHog scan completed"
+        # Try installing TruffleHog via pip
+        if python3 -m pip --version > /dev/null 2>&1; then
+          echo "Installing TruffleHog via pip..."
+          python3 -m pip install truffleHog --user || echo "Failed to install truffleHog via pip"
+        elif command -v pip3 > /dev/null 2>&1; then
+          echo "Installing TruffleHog via pip3..."
+          pip3 install truffleHog --user || echo "Failed to install truffleHog via pip3"
+        elif command -v pip > /dev/null 2>&1; then
+          echo "Installing TruffleHog via pip..."
+          pip install truffleHog --user || echo "Failed to install truffleHog via pip"
+        else
+          echo "No pip found, attempting alternative installation..."
+          curl -s https://bootstrap.pypa.io/get-pip.py | python3 || echo "Failed to install pip"
+          python3 -m pip install truffleHog --user || echo "Failed to install truffleHog"
+        fi
+        
+        # Check if TruffleHog is available and run analysis
+        if command -v trufflehog > /dev/null 2>&1; then
+          echo "##[section]Running TruffleHog secret detection..."
+          trufflehog --version || echo "TruffleHog version check failed"
+          trufflehog --json --output $(Build.ArtifactStagingDirectory)/trufflehog-report.json . || true
+          trufflehog . || echo "TruffleHog scan completed"
+        else
+          echo "##[warning]TruffleHog installation failed. Skipping secret detection."
+          echo "{\"error\": \"TruffleHog not available\"}" > $(Build.ArtifactStagingDirectory)/trufflehog-report.json
+        fi
       displayName: 'Secret Detection with TruffleHog'
       continueOnError: true
 
