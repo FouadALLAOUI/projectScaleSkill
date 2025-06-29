@@ -203,7 +203,7 @@ stages:
 
 # STAGE 2: Security Testing (SAST & DAST)
 - stage: SecurityTesting
-  approval: true # Need approval to run this stage
+  #approval: true # Need approval to run this stage
   #approvalOptions:
   #  requiredApprovers:
   #    - 'admin'
