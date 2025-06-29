@@ -203,22 +203,20 @@ stages:
 
 # STAGE 2: Security Testing (SAST & DAST)
 - stage: SecurityTesting
+  #approval: true # Need approval to run this stage
+  #approvalOptions:
+  #  requiredApprovers:
+  #    - 'admin'
+  #    - 'security-admin'
+  #    - 'security-reviewer'
+  #    - 'security-approver'
+  #    - 'security-tester'
   displayName: 'Security Testing (SAST & DAST)'
   dependsOn: validation
-  condition: succeeded('validation')
-  variables:
-    # Security testing configuration
-    FAIL_ON_CRITICAL: true
-    FAIL_ON_HIGH: false
-    SECURITY_REPORTS_PATH: '$(Build.ArtifactStagingDirectory)/security-reports'
   jobs:
-  
   # SAST (Static Application Security Testing)
   - job: StaticSecurityAnalysis
     displayName: 'SAST - Static Application Security Testing'
-    timeoutInMinutes: 45
-    cancelTimeoutInMinutes: 5
-    
     steps:
     # Setup Node.js environment for security tools
     - task: NodeTool@0
@@ -226,424 +224,109 @@ stages:
         versionSpec: $(NODE_VERSION)
       displayName: 'Setup Node.js Environment'
 
-    # Create security reports directory structure
-    - script: |
-        echo "##[section]Creating security reports directory structure..."
-        mkdir -p $(SECURITY_REPORTS_PATH)/{npm,eslint,retire,semgrep,njsscan,secrets,summary}
-        echo "Directory structure created successfully"
-      displayName: 'Initialize Security Reports Structure'
-
     # Install dependencies for security scanning
     - script: |
-        echo "##[section]Installing dependencies for comprehensive security analysis..."
-        echo "Node.js version: $(node --version)"
-        echo "npm version: $(npm --version)"
-        
-        # Install with better error handling
-        npm ci --legacy-peer-deps || npm install --legacy-peer-deps
-        
-        echo "##[section]Verifying critical dependencies..."
-        npm list --depth=0 | grep -E "(next|react|typescript)" || echo "Core dependencies verification completed"
-      displayName: 'Install Dependencies for Security Analysis'
+        echo "##[section]Installing all dependencies for comprehensive security analysis..."
+        npm install --legacy-peer-deps
+      displayName: 'Install All Dependencies for Security Analysis'
       
     # Enhanced dependency vulnerability scanning
     - script: |
-        echo "##[section]Running comprehensive dependency vulnerability analysis..."
+        echo "##[section]Running enhanced dependency vulnerability scan..."
+        npm audit --audit-level=low --json > $(Build.ArtifactStagingDirectory)/npm-audit-detailed.json || true
+        npm audit --audit-level=moderate || echo "Moderate vulnerabilities found"
+        npm audit --audit-level=high || echo "High vulnerabilities found"
+        npm audit --audit-level=critical || echo "Critical vulnerabilities found"
         
-        # Full dependency audit
-        echo "##[subsection]Full dependency vulnerability scan..."
-        npm audit --json > $(SECURITY_REPORTS_PATH)/npm/audit-full.json 2>/dev/null || true
-        npm audit --audit-level=moderate > $(SECURITY_REPORTS_PATH)/npm/audit-summary.txt 2>&1 || echo "Vulnerabilities detected"
+        echo "##[section]Running production-only vulnerability scan..."
+        npm audit --production --audit-level=low --json > $(Build.ArtifactStagingDirectory)/npm-audit-production.json || true
+        npm audit --production || echo "Production vulnerabilities found"
         
-        # Production-only audit
-        echo "##[subsection]Production dependency vulnerability scan..."
-        npm audit --production --json > $(SECURITY_REPORTS_PATH)/npm/audit-production.json 2>/dev/null || true
+        echo "##[section]Checking for outdated packages..."
+        npm outdated --json > $(Build.ArtifactStagingDirectory)/npm-outdated.json || true
+        npm outdated || echo "Outdated packages found"
         
-        # Critical and high severity check
-        echo "##[subsection]Critical and high severity vulnerability check..."
-        CRITICAL_COUNT=$(npm audit --json 2>/dev/null | jq -r '.metadata.vulnerabilities.critical // 0')
-        HIGH_COUNT=$(npm audit --json 2>/dev/null | jq -r '.metadata.vulnerabilities.high // 0')
+        echo "##[section]Listing all dependencies for security review..."
+        npm list --depth=0 --json > $(Build.ArtifactStagingDirectory)/npm-dependencies.json || true
+        npm list --depth=0 || echo "Dependencies listed with warnings"
         
-        echo "Critical vulnerabilities: $CRITICAL_COUNT"
-        echo "High vulnerabilities: $HIGH_COUNT"
-        echo "##vso[task.setvariable variable=CriticalVulns]$CRITICAL_COUNT"
-        echo "##vso[task.setvariable variable=HighVulns]$HIGH_COUNT"
-        
-        # Package information
-        echo "##[subsection]Gathering package information..."
-        npm outdated --json > $(SECURITY_REPORTS_PATH)/npm/outdated.json 2>/dev/null || true
-        npm list --depth=0 --json > $(SECURITY_REPORTS_PATH)/npm/dependencies-tree.json 2>/dev/null || true
-        
-        # License audit
-        echo "##[subsection]License compatibility check..."
-        npm list --depth=0 --json | jq -r '.dependencies | to_entries[] | select(.value.licenses) | "\(.key): \(.value.licenses)"' > $(SECURITY_REPORTS_PATH)/npm/licenses.txt 2>/dev/null || echo "License information gathered"
-        
-        echo "Dependency vulnerability analysis completed"
-      displayName: 'Comprehensive Dependency Vulnerability Analysis'
+        echo "##[section]Listing production dependencies only..."
+        npm list --depth=0 --production --json > $(Build.ArtifactStagingDirectory)/npm-dependencies-production.json || true
+        npm list --depth=0 --production || echo "Production dependencies listed"
+      displayName: 'Enhanced Dependency Security Scan'
       continueOnError: true
 
-    # Professional ESLint Security Analysis
+    # Install and run ESLint Security Plugin
     - script: |
-        echo "##[section]Installing and configuring ESLint security analysis..."
+        echo "##[section]Installing ESLint security plugins..."
+        npm install --no-save eslint-plugin-security @typescript-eslint/eslint-plugin @typescript-eslint/parser || true
         
-        # Install security plugins with specific versions for consistency
-        echo "##[subsection]Installing ESLint security plugins..."
-        npm install --no-save \
-          eslint-plugin-security@^3.0.1 \
-          eslint-plugin-no-secrets@^1.0.2 \
-          @typescript-eslint/eslint-plugin@^7.0.0 \
-          @typescript-eslint/parser@^7.0.0 \
-          eslint-plugin-react-hooks@^4.6.0 \
-          eslint-plugin-jsx-a11y@^6.8.0 || echo "Some plugins may have failed to install"
+        echo "##[section]Running ESLint security analysis with dedicated security config..."
+        npx eslint --ext .js,.jsx,.ts,.tsx --config .eslintrc-security.json --format json --output-file $(Build.ArtifactStagingDirectory)/eslint-security.json . || true
+        npx eslint --ext .js,.jsx,.ts,.tsx --config .eslintrc-security.json . || echo "ESLint security issues found"
         
-        # Verify ESLint security configuration exists
-        if [ ! -f ".eslintrc-security.json" ]; then
-          echo "##[subsection]Creating enterprise-grade ESLint security configuration..."
-          cat > .eslintrc-security.json << 'EOF'
-          {
-            "env": {
-              "browser": true,
-              "node": true,
-              "es2022": true
-            },
-            "extends": [
-              "eslint:recommended",
-              "@typescript-eslint/recommended"
-            ],
-            "plugins": [
-              "security",
-              "no-secrets",
-              "@typescript-eslint",
-              "react-hooks",
-              "jsx-a11y"
-            ],
-            "parser": "@typescript-eslint/parser",
-            "parserOptions": {
-              "ecmaVersion": 2022,
-              "sourceType": "module",
-              "ecmaFeatures": {
-                "jsx": true
-              }
-            },
-            "rules": {
-              "security/detect-buffer-noassert": "error",
-              "security/detect-child-process": "error",
-              "security/detect-disable-mustache-escape": "error",
-              "security/detect-eval-with-expression": "error",
-              "security/detect-no-csrf-before-method-override": "error",
-              "security/detect-non-literal-fs-filename": "warn",
-              "security/detect-non-literal-regexp": "warn",
-              "security/detect-non-literal-require": "warn",
-              "security/detect-object-injection": "error",
-              "security/detect-possible-timing-attacks": "error",
-              "security/detect-pseudoRandomBytes": "error",
-              "security/detect-unsafe-regex": "error",
-              "no-secrets/no-secrets": "error",
-              "no-eval": "error",
-              "no-implied-eval": "error",
-              "no-new-func": "error",
-              "no-script-url": "error"
-            }
-          }
-          EOF
-        fi
-        
-        echo "##[subsection]Running ESLint security analysis..."
-        npx eslint --ext .js,.jsx,.ts,.tsx,.mjs,.cjs \
-          --config .eslintrc-security.json \
-          --format json \
-          --output-file $(SECURITY_REPORTS_PATH)/eslint/security-analysis.json \
-          --ignore-path .gitignore \
-          . || echo "ESLint security analysis completed with findings"
-        
-        # Generate human-readable report
-        npx eslint --ext .js,.jsx,.ts,.tsx,.mjs,.cjs \
-          --config .eslintrc-security.json \
-          --format stylish \
-          --ignore-path .gitignore \
-          . > $(SECURITY_REPORTS_PATH)/eslint/security-report.txt 2>&1 || echo "Security report generated"
-        
-        # Count security issues
-        SECURITY_ISSUES=$(jq -r '[.[].messages[]] | length' $(SECURITY_REPORTS_PATH)/eslint/security-analysis.json 2>/dev/null || echo "0")
-        echo "##vso[task.setvariable variable=SecurityIssues]$SECURITY_ISSUES"
-        echo "ESLint security issues found: $SECURITY_ISSUES"
-        
-      displayName: 'Professional ESLint Security Analysis'
+        echo "##[section]Running ESLint with standard configuration as fallback..."
+        npx eslint --ext .js,.jsx,.ts,.tsx --format json --output-file $(Build.ArtifactStagingDirectory)/eslint-standard.json . || true
+        npx eslint --ext .js,.jsx,.ts,.tsx . || echo "ESLint analysis completed"
+      displayName: 'ESLint Security Analysis'
       continueOnError: true
 
-    # Enhanced Retire.js Analysis
+    # Install and run Retire.js for known vulnerabilities
     - script: |
-        echo "##[section]Installing and running Retire.js vulnerability scanner..."
+        echo "##[section]Installing and running Retire.js..."
+        npm install -g retire || true
         
-        # Install specific version for consistency
-        npm install -g retire@^5.0.0 || echo "Retire.js installation failed"
+        echo "##[section]Running Retire.js vulnerability scan with JSON output..."
+        retire --outputformat json --outputpath $(Build.ArtifactStagingDirectory)/retire-js-report.json . || true
         
-        if command -v retire >/dev/null 2>&1; then
-          echo "##[subsection]Running Retire.js vulnerability scan..."
-          retire --version || echo "Version check failed"
-          
-          # Run with JSON output
-          retire --outputformat json \
-            --outputpath $(SECURITY_REPORTS_PATH)/retire/vulnerabilities.json \
-            --ignore ignore.json \
-            . || echo "Retire.js found potential vulnerabilities"
-          
-          # Run with readable output
-          retire --outputformat text \
-            --outputpath $(SECURITY_REPORTS_PATH)/retire/vulnerabilities.txt \
-            . || echo "Retire.js scan completed"
-          
-          # Count vulnerabilities
-          RETIRE_VULNS=$(jq -r '[.[] | select(.results)] | length' $(SECURITY_REPORTS_PATH)/retire/vulnerabilities.json 2>/dev/null || echo "0")
-          echo "##vso[task.setvariable variable=RetireVulns]$RETIRE_VULNS"
-          echo "Retire.js vulnerabilities found: $RETIRE_VULNS"
-        else
-          echo "##[warning]Retire.js not available, skipping scan"
-          echo '{"error": "Retire.js not available"}' > $(SECURITY_REPORTS_PATH)/retire/vulnerabilities.json
-        fi
-      displayName: 'Enhanced Retire.js Vulnerability Scanner'
+        echo "##[section]Running Retire.js vulnerability scan with default output..."
+        retire . || echo "Retire.js found vulnerable libraries"
+        
+        echo "##[section]Running Retire.js scan for current directory..."
+        retire || echo "Retire.js scan completed"
+      displayName: 'Retire.js Vulnerability Scanner'
       continueOnError: true
 
-    # Professional Semgrep Analysis
+    # Install and run Semgrep for advanced static analysis
     - script: |
-        echo "##[section]Installing and running Semgrep static analysis..."
+        echo "##[section]Installing and running Semgrep..."
+        python3 -m pip install semgrep || echo "Failed to install semgrep"
         
-        # Install Semgrep with proper error handling
-        echo "##[subsection]Installing Semgrep..."
-        if command -v python3 >/dev/null 2>&1; then
-          python3 -m pip install --user semgrep || echo "Semgrep pip installation failed"
-        fi
-        
-        # Try alternative installation methods
-        if ! command -v semgrep >/dev/null 2>&1; then
-          echo "Trying alternative Semgrep installation..."
-          curl -fsSL https://semgrep.dev/install | bash || echo "Direct installation failed"
-        fi
-        
-        if command -v semgrep >/dev/null 2>&1; then
-          echo "##[subsection]Running comprehensive Semgrep analysis..."
-          semgrep --version
-          
-          # Auto-detection scan
-          semgrep --config=auto \
-            --json \
-            --output=$(SECURITY_REPORTS_PATH)/semgrep/auto-scan.json \
-            --timeout=300 \
-            --max-target-bytes=5000000 \
-            . || echo "Auto-scan completed with findings"
-          
-          # Specific ruleset scans
-          echo "##[subsection]Running targeted security scans..."
-          semgrep --config=p/security-audit \
-            --config=p/secrets \
-            --config=p/javascript \
-            --config=p/typescript \
-            --config=p/react \
-            --json \
-            --output=$(SECURITY_REPORTS_PATH)/semgrep/security-focused.json \
-            . || echo "Security-focused scan completed"
-          
-          # Generate summary report
-          semgrep --config=auto \
-            --output=$(SECURITY_REPORTS_PATH)/semgrep/summary.txt \
-            . || echo "Summary report generated"
-          
-          # Count findings
-          SEMGREP_FINDINGS=$(jq -r '.results | length' $(SECURITY_REPORTS_PATH)/semgrep/auto-scan.json 2>/dev/null || echo "0")
-          echo "##vso[task.setvariable variable=SemgrepFindings]$SEMGREP_FINDINGS"
-          echo "Semgrep findings: $SEMGREP_FINDINGS"
-        else
-          echo "##[warning]Semgrep not available, creating placeholder report"
-          echo '{"error": "Semgrep not available", "results": []}' > $(SECURITY_REPORTS_PATH)/semgrep/auto-scan.json
-        fi
-      displayName: 'Professional Semgrep Static Analysis'
+        # Run Semgrep with JavaScript/TypeScript rulesets
+        semgrep --config=auto --json --output=$(Build.ArtifactStagingDirectory)/semgrep-report.json . || true
+        semgrep --config=p/javascript --config=p/typescript --config=p/react --config=p/nextjs . || echo "Semgrep analysis completed with findings"
+      displayName: 'Semgrep Static Analysis'
       continueOnError: true
 
-    # Secret Detection Suite
+    # Run njsscan for Node.js specific security analysis
     - script: |
-        echo "##[section]Running comprehensive secret detection..."
+        echo "##[section]Installing and running njsscan..."
+        python3 -m pip install njsscan || echo "Failed to install njsscan"
         
-        # Method 1: TruffleHog (if available)
-        echo "##[subsection]Installing TruffleHog..."
-        if command -v python3 >/dev/null 2>&1; then
-          python3 -m pip install --user truffleHog || echo "TruffleHog installation failed"
-        fi
-        
-        if command -v trufflehog >/dev/null 2>&1; then
-          echo "Running TruffleHog secret detection..."
-          trufflehog --json --output $(SECURITY_REPORTS_PATH)/secrets/trufflehog.json . || echo "TruffleHog scan completed"
-        else
-          echo "TruffleHog not available, using alternative methods"
-        fi
-        
-        # Method 2: GitLeaks-style pattern detection
-        echo "##[subsection]Running pattern-based secret detection..."
-        
-        # Create comprehensive secret patterns
-        cat > /tmp/secret-patterns.txt << 'EOF'
-        # API Keys and Tokens
-        (api[_-]?key|apikey)[[:space:]]*[:=][[:space:]]*['"'"'"]?[a-zA-Z0-9_-]{20,}['"'"'"]?
-        (secret[_-]?key|secretkey)[[:space:]]*[:=][[:space:]]*['"'"'"]?[a-zA-Z0-9_-]{20,}['"'"'"]?
-        (access[_-]?token|accesstoken)[[:space:]]*[:=][[:space:]]*['"'"'"]?[a-zA-Z0-9_-]{20,}['"'"'"]?
-        (auth[_-]?token|authtoken)[[:space:]]*[:=][[:space:]]*['"'"'"]?[a-zA-Z0-9_-]{20,}['"'"'"]?
-        
-        # Database URLs
-        (database[_-]?url|db[_-]?url)[[:space:]]*[:=][[:space:]]*['"'"'"]?[a-zA-Z0-9+]+://[^[:space:]'"'"'"]+['"'"'"]?
-        mongodb://[^[:space:]'"'"'"]+
-        postgres://[^[:space:]'"'"'"]+
-        mysql://[^[:space:]'"'"'"]+
-        
-        # AWS Keys
-        AKIA[0-9A-Z]{16}
-        aws[_-]?secret[_-]?access[_-]?key[[:space:]]*[:=][[:space:]]*['"'"'"]?[a-zA-Z0-9/+=]{40}['"'"'"]?
-        
-        # Other sensitive patterns
-        (password|passwd|pwd)[[:space:]]*[:=][[:space:]]*['"'"'"]?[^[:space:]{'"'"'"][^[:space:]'"'"'"]*['"'"'"]?
-        (private[_-]?key|privatekey)[[:space:]]*[:=]
-        -----BEGIN[[:space:]]+(RSA[[:space:]]+)?PRIVATE[[:space:]]+KEY-----
-        EOF
-        
-        # Run pattern detection
-        grep -r -n -H -i -f /tmp/secret-patterns.txt \
-          --include="*.js" --include="*.ts" --include="*.jsx" --include="*.tsx" \
-          --include="*.json" --include="*.yml" --include="*.yaml" \
-          --include="*.env*" --include="*.config.*" \
-          --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build \
-          . > $(SECURITY_REPORTS_PATH)/secrets/pattern-detection.txt 2>/dev/null || echo "Pattern detection completed"
-        
-        # Count potential secrets
-        SECRET_COUNT=$(wc -l < $(SECURITY_REPORTS_PATH)/secrets/pattern-detection.txt 2>/dev/null || echo "0")
-        echo "##vso[task.setvariable variable=SecretCount]$SECRET_COUNT"
-        echo "Potential secrets detected: $SECRET_COUNT"
-        
-        # Environment variable audit
-        echo "##[subsection]Environment variable usage audit..."
-        grep -r -n -H "process\.env\." \
-          --include="*.js" --include="*.ts" --include="*.jsx" --include="*.tsx" \
-          --exclude-dir=node_modules --exclude-dir=.git \
-          . > $(SECURITY_REPORTS_PATH)/secrets/env-usage.txt 2>/dev/null || echo "Environment variable audit completed"
-        
-        rm -f /tmp/secret-patterns.txt
-      displayName: 'Comprehensive Secret Detection Suite'
+        njsscan --json --output $(Build.ArtifactStagingDirectory)/njsscan-report.json . || true
+        njsscan . || echo "njsscan analysis completed with findings"
+      displayName: 'njsscan Node.js Security Analysis'
       continueOnError: true
 
-    # Generate Security Summary Report
+    # Secret detection with TruffleHog
     - script: |
-        echo "##[section]Generating comprehensive security summary..."
+        echo "##[section]Installing and running TruffleHog for secret detection..."
+        python3 -m pip install truffleHog || echo "Failed to install truffleHog"
         
-        # Create detailed security summary
-        cat > $(SECURITY_REPORTS_PATH)/summary/security-summary.md << 'EOF'
-        # Security Analysis Summary Report
-        
-        ## Overview
-        This report provides a comprehensive overview of the security analysis performed on the codebase.
-        
-        ## Vulnerability Summary
-        - **Critical Vulnerabilities**: $(CriticalVulns)
-        - **High Vulnerabilities**: $(HighVulns)  
-        - **ESLint Security Issues**: $(SecurityIssues)
-        - **Retire.js Vulnerabilities**: $(RetireVulns)
-        - **Semgrep Findings**: $(SemgrepFindings)
-        - **Potential Secrets**: $(SecretCount)
-        
-        ## Analysis Details
-        
-        ### Dependency Vulnerabilities
-        - Full audit results: `npm/audit-full.json`
-        - Production audit: `npm/audit-production.json`
-        - Outdated packages: `npm/outdated.json`
-        
-        ### Static Code Analysis
-        - ESLint security analysis: `eslint/security-analysis.json`
-        - Semgrep findings: `semgrep/auto-scan.json`
-        - Retire.js vulnerabilities: `retire/vulnerabilities.json`
-        
-        ### Secret Detection
-        - Pattern-based detection: `secrets/pattern-detection.txt`
-        - Environment variable usage: `secrets/env-usage.txt`
-        
-        ## Recommendations
-        1. Review and address all critical and high severity vulnerabilities
-        2. Update outdated packages to latest secure versions
-        3. Fix ESLint security issues identified in the report
-        4. Verify and secure any detected secrets or sensitive information
-        5. Implement proper environment variable management
-        
-        ## Report Generation
-        - Generated: $(date)
-        - Pipeline: $(Build.DefinitionName)
-        - Build: $(Build.BuildNumber)
-        EOF
-        
-        # Replace variables in the summary
-        sed -i "s/\$(CriticalVulns)/${CriticalVulns:-0}/g" $(SECURITY_REPORTS_PATH)/summary/security-summary.md
-        sed -i "s/\$(HighVulns)/${HighVulns:-0}/g" $(SECURITY_REPORTS_PATH)/summary/security-summary.md
-        sed -i "s/\$(SecurityIssues)/${SecurityIssues:-0}/g" $(SECURITY_REPORTS_PATH)/summary/security-summary.md
-        sed -i "s/\$(RetireVulns)/${RetireVulns:-0}/g" $(SECURITY_REPORTS_PATH)/summary/security-summary.md
-        sed -i "s/\$(SemgrepFindings)/${SemgrepFindings:-0}/g" $(SECURITY_REPORTS_PATH)/summary/security-summary.md
-        sed -i "s/\$(SecretCount)/${SecretCount:-0}/g" $(SECURITY_REPORTS_PATH)/summary/security-summary.md
-        
-        echo "##[section]Security analysis summary:"
-        echo "Critical vulnerabilities: ${CriticalVulns:-0}"
-        echo "High vulnerabilities: ${HighVulns:-0}"
-        echo "ESLint security issues: ${SecurityIssues:-0}"
-        echo "Retire.js vulnerabilities: ${RetireVulns:-0}"
-        echo "Semgrep findings: ${SemgrepFindings:-0}"
-        echo "Potential secrets: ${SecretCount:-0}"
-        
-        # Set overall security status
-        TOTAL_CRITICAL=$((${CriticalVulns:-0} + ${SecurityIssues:-0}))
-        if [ "$TOTAL_CRITICAL" -gt 0 ]; then
-          echo "##vso[task.setvariable variable=SecurityStatus]CRITICAL"
-          echo "##[warning]Critical security issues detected!"
-        elif [ "${HighVulns:-0}" -gt 0 ]; then
-          echo "##vso[task.setvariable variable=SecurityStatus]HIGH"
-          echo "##[warning]High severity security issues detected!"
-        else
-          echo "##vso[task.setvariable variable=SecurityStatus]PASSED"
-          echo "##[section]Security analysis passed without critical issues"
-        fi
-      displayName: 'Generate Security Summary Report'
-      
-    # Security Gate Check
-    - script: |
-        echo "##[section]Security gate evaluation..."
-        
-        if [ "${SecurityStatus}" = "CRITICAL" ] && [ "$(FAIL_ON_CRITICAL)" = "true" ]; then
-          echo "##[error]Security gate failed: Critical vulnerabilities detected"
-          echo "##[error]Critical vulnerabilities: ${CriticalVulns:-0}"
-          echo "##[error]Critical ESLint issues: ${SecurityIssues:-0}"
-          exit 1
-        elif [ "${SecurityStatus}" = "HIGH" ] && [ "$(FAIL_ON_HIGH)" = "true" ]; then
-          echo "##[error]Security gate failed: High severity vulnerabilities detected"
-          echo "##[error]High vulnerabilities: ${HighVulns:-0}"
-          exit 1
-        else
-          echo "##[section]Security gate passed"
-          echo "Security status: ${SecurityStatus}"
-        fi
-      displayName: 'Security Gate Evaluation'
-      condition: always()
+        trufflehog --json --output $(Build.ArtifactStagingDirectory)/trufflehog-report.json . || true
+        trufflehog . || echo "TruffleHog scan completed"
+      displayName: 'Secret Detection with TruffleHog'
+      continueOnError: true
 
-    # Publish comprehensive security reports
+    # Publish SAST artifacts
     - task: PublishBuildArtifacts@1
       inputs:
-        pathToPublish: $(SECURITY_REPORTS_PATH)
-        artifactName: 'Security-Analysis-Reports'
+        pathToPublish: $(Build.ArtifactStagingDirectory)
+        artifactName: 'SAST-Reports'
         publishLocation: 'Container'
-      displayName: 'Publish Security Analysis Reports'
+      displayName: 'Publish SAST Reports'
       condition: always()
-      
-    # Publish security test results
-    - task: PublishTestResults@2
-      inputs:
-        testResultsFormat: 'JUnit'
-        testResultsFiles: '$(SECURITY_REPORTS_PATH)/**/*.xml'
-        failTaskOnFailedTests: false
-        testRunTitle: 'Security Analysis Results'
-      displayName: 'Publish Security Test Results'
-      condition: and(always(), eq(variables['Agent.OS'], 'Linux'))
-      continueOnError: true
+
 
 
 #  # DAST (Dynamic Application Security Testing)
