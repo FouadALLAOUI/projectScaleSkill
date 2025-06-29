@@ -5,7 +5,7 @@
 
 name: 'CI_Pipeline_for_ProjectScaleSkill_App'
 
-trigger: none  # No direct commit triggers
+#trigger: none  # No direct commit triggers
 pr: none  # No PR triggers (handled by PR pipeline)
 
 # Pipeline resource dependency - only run after successful PR pipeline completion
