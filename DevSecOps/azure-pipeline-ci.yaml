@@ -200,6 +200,273 @@ stages:
       displayName: 'Publish Security Reports'
       condition: succeededOrFailed()  # Run even if previous steps failed
 
+
+# STAGE 2: Security Testing (SAST & DAST)
+- stage: SecurityTesting
+  displayName: 'Security Testing (SAST & DAST)'
+  dependsOn: validation
+  jobs:
+  # SAST (Static Application Security Testing)
+  - job: StaticSecurityAnalysis
+    displayName: 'SAST - Static Application Security Testing'
+    steps:
+    # Setup Node.js environment for security tools
+    - task: NodeTool@0
+      inputs:
+        versionSpec: $(NODE_VERSION)
+      displayName: 'Setup Node.js Environment'
+
+    # Install dependencies for security scanning
+    - script: |
+        echo "##[section]Installing dependencies for security analysis..."
+        npm install --legacy-peer-deps --production
+      displayName: 'Install Production Dependencies'
+      
+    # Enhanced dependency vulnerability scanning
+    - script: |
+        echo "##[section]Running enhanced dependency vulnerability scan..."
+        npm audit --production --audit-level=low --json > $(Build.ArtifactStagingDirectory)/npm-audit-detailed.json || true
+        npm audit --production --audit-level=moderate || echo "Moderate vulnerabilities found"
+        npm audit --production --audit-level=high || echo "High vulnerabilities found"
+        npm audit --production --audit-level=critical || echo "Critical vulnerabilities found"
+        
+        echo "##[section]Checking for outdated packages..."
+        npm outdated --json > $(Build.ArtifactStagingDirectory)/npm-outdated.json || true
+        npm outdated || echo "Outdated packages found"
+        
+        echo "##[section]Listing all dependencies for security review..."
+        npm list --depth=0 --json > $(Build.ArtifactStagingDirectory)/npm-dependencies.json || true
+        npm list --depth=0
+      displayName: 'Enhanced Dependency Security Scan'
+      continueOnError: true
+
+    # Install and run ESLint Security Plugin
+    - script: |
+        echo "##[section]Installing ESLint security plugins..."
+        npm install --no-save eslint-plugin-security eslint-plugin-node-security || true
+        
+        echo "##[section]Running ESLint security analysis..."
+        npx eslint --ext .js,.jsx,.ts,.tsx --config .eslintrc.json --format json --output-file $(Build.ArtifactStagingDirectory)/eslint-security.json . || true
+        npx eslint --ext .js,.jsx,.ts,.tsx . || echo "ESLint security issues found"
+      displayName: 'ESLint Security Analysis'
+      continueOnError: true
+
+    # Install and run Retire.js for known vulnerabilities
+    - script: |
+        echo "##[section]Installing and running Retire.js..."
+        npm install -g retire || true
+        retire --js --outputformat json --outputpath $(Build.ArtifactStagingDirectory)/retire-js-report.json . || true
+        retire --js . || echo "Retire.js found vulnerable libraries"
+      displayName: 'Retire.js Vulnerability Scanner'
+      continueOnError: true
+
+    # Install and run Semgrep for advanced static analysis
+    - script: |
+        echo "##[section]Installing and running Semgrep..."
+        python3 -m pip install semgrep || echo "Failed to install semgrep"
+        
+        # Run Semgrep with JavaScript/TypeScript rulesets
+        semgrep --config=auto --json --output=$(Build.ArtifactStagingDirectory)/semgrep-report.json . || true
+        semgrep --config=p/javascript --config=p/typescript --config=p/react --config=p/nextjs . || echo "Semgrep analysis completed with findings"
+      displayName: 'Semgrep Static Analysis'
+      continueOnError: true
+
+    # Run njsscan for Node.js specific security analysis
+    - script: |
+        echo "##[section]Installing and running njsscan..."
+        python3 -m pip install njsscan || echo "Failed to install njsscan"
+        
+        njsscan --json --output $(Build.ArtifactStagingDirectory)/njsscan-report.json . || true
+        njsscan . || echo "njsscan analysis completed with findings"
+      displayName: 'njsscan Node.js Security Analysis'
+      continueOnError: true
+
+    # Secret detection with TruffleHog
+    - script: |
+        echo "##[section]Installing and running TruffleHog for secret detection..."
+        python3 -m pip install truffleHog || echo "Failed to install truffleHog"
+        
+        trufflehog --json --output $(Build.ArtifactStagingDirectory)/trufflehog-report.json . || true
+        trufflehog . || echo "TruffleHog scan completed"
+      displayName: 'Secret Detection with TruffleHog'
+      continueOnError: true
+
+    # Publish SAST artifacts
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathToPublish: $(Build.ArtifactStagingDirectory)
+        artifactName: 'SAST-Reports'
+        publishLocation: 'Container'
+      displayName: 'Publish SAST Reports'
+      condition: always()
+
+
+
+
+
+#  # DAST (Dynamic Application Security Testing)
+#  - job: DynamicSecurityAnalysis
+#    displayName: 'DAST - Dynamic Application Security Testing'
+#    dependsOn: StaticSecurityAnalysis
+#    steps:
+#    # Setup Node.js environment
+#    - task: NodeTool@0
+#      inputs:
+#        versionSpec: $(NODE_VERSION)
+#      displayName: 'Setup Node.js Environment'
+#
+#    # Install dependencies and build application
+#    - script: |
+#        echo "##[section]Installing dependencies..."
+#        npm install --legacy-peer-deps
+#        
+#        echo "##[section]Building application for DAST testing..."
+#        npm run build
+#      displayName: 'Build Application for DAST'
+#
+#    # Start application for dynamic testing
+#    - script: |
+#        echo "##[section]Starting Next.js application for DAST..."
+#        npm start &
+#        APP_PID=$!
+#        echo "Application PID: $APP_PID"
+#        echo $APP_PID > $(Build.ArtifactStagingDirectory)/app.pid
+#        
+#        echo "##[section]Waiting for application to start..."
+#        sleep 30
+#        
+#        echo "##[section]Verifying application is running..."
+#        curl -f http://localhost:3000 || echo "Application may not be fully ready"
+#      displayName: 'Start Application for Testing'
+#      continueOnError: true
+#
+#    # Install and run OWASP ZAP for web security testing
+#    - script: |
+#        echo "##[section]Installing OWASP ZAP..."
+#        # Download and setup ZAP
+#        wget -q https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2_14_0_unix.sh -O /tmp/zap-installer.sh || echo "Failed to download ZAP"
+#        chmod +x /tmp/zap-installer.sh || true
+#        /tmp/zap-installer.sh -q || echo "ZAP installation may have failed"
+#        
+#        echo "##[section]Running OWASP ZAP baseline scan..."
+#        # Run ZAP baseline scan against the running application
+#        docker run -t owasp/zap2docker-stable zap-baseline.py -t http://host.docker.internal:3000 -J $(Build.ArtifactStagingDirectory)/zap-baseline-report.json || echo "ZAP baseline scan completed"
+#        docker run -t owasp/zap2docker-stable zap-baseline.py -t http://host.docker.internal:3000 || echo "ZAP scan found security issues"
+#      displayName: 'OWASP ZAP Security Scan'
+#      continueOnError: true
+#
+#    # Run Lighthouse security audit
+#    - script: |
+#        echo "##[section]Installing Lighthouse..."
+#        npm install -g lighthouse || true
+#        
+#        echo "##[section]Running Lighthouse security audit..."
+#        lighthouse http://localhost:3000 --only-categories=best-practices --output=json --output-path=$(Build.ArtifactStagingDirectory)/lighthouse-security.json || true
+#        lighthouse http://localhost:3000 --only-categories=best-practices || echo "Lighthouse audit completed"
+#      displayName: 'Lighthouse Security Audit'
+#      continueOnError: true
+#
+#    # Web application security headers check
+#    - script: |
+#        echo "##[section]Checking security headers..."
+#        curl -I http://localhost:3000 > $(Build.ArtifactStagingDirectory)/security-headers.txt || true
+#        
+#        echo "##[section]Analyzing security headers..."
+#        python3 -c "
+#import requests
+#import json
+#
+#try:
+#    response = requests.get('http://localhost:3000')
+#    headers = dict(response.headers)
+#    
+#    security_analysis = {
+#        'status_code': response.status_code,
+#        'security_headers': {
+#            'X-Frame-Options': headers.get('X-Frame-Options', 'MISSING'),
+#            'X-Content-Type-Options': headers.get('X-Content-Type-Options', 'MISSING'),
+#            'X-XSS-Protection': headers.get('X-XSS-Protection', 'MISSING'),
+#            'Strict-Transport-Security': headers.get('Strict-Transport-Security', 'MISSING'),
+#            'Content-Security-Policy': headers.get('Content-Security-Policy', 'MISSING'),
+#            'Referrer-Policy': headers.get('Referrer-Policy', 'MISSING')
+#        },
+#        'all_headers': headers
+#    }
+#    
+#    with open('$(Build.ArtifactStagingDirectory)/security-headers-analysis.json', 'w') as f:
+#        json.dump(security_analysis, f, indent=2)
+#        
+#    print('Security Headers Analysis:')
+#    for header, value in security_analysis['security_headers'].items():
+#        status = '✓' if value != 'MISSING' else '✗'
+#        print(f'{status} {header}: {value}')
+#        
+#except Exception as e:
+#    print(f'Error analyzing security headers: {e}')
+#" || echo "Security headers analysis completed"
+#      displayName: 'Security Headers Analysis'
+#      continueOnError: true
+#
+#    # Stop application
+#    - script: |
+#        echo "##[section]Stopping application..."
+#        if [ -f "$(Build.ArtifactStagingDirectory)/app.pid" ]; then
+#          APP_PID=$(cat $(Build.ArtifactStagingDirectory)/app.pid)
+#          kill $APP_PID || echo "Application may have already stopped"
+#          echo "Application stopped"
+#        fi
+#      displayName: 'Stop Application'
+#      condition: always()
+#
+#    # Publish DAST artifacts
+#    - task: PublishBuildArtifacts@1
+#      inputs:
+#        pathToPublish: $(Build.ArtifactStagingDirectory)
+#        artifactName: 'DAST-Reports'
+#        publishLocation: 'Container'
+#      displayName: 'Publish DAST Reports'
+#      condition: always()
+#
+#  # Security Summary and Reporting
+#  - job: SecuritySummaryReport
+#    displayName: 'Security Testing Summary'
+#    dependsOn: 
+#    - StaticSecurityAnalysis
+#    - DynamicSecurityAnalysis
+#    steps:
+#    # Generate comprehensive security summary
+#    - script: |
+#        echo "##[section]Generating Security Testing Summary..."
+#        
+#        echo "=================================="
+#        echo "SECURITY TESTING SUMMARY REPORT"
+#        echo "=================================="
+#        echo "Pipeline: $(Build.DefinitionName)"
+#        echo "Build: $(Build.BuildNumber)"
+#        echo "Date: $(date)"
+#        echo ""
+#        
+#        echo "SAST (Static Application Security Testing):"
+#        echo "- ✓ Dependency vulnerability scanning (npm audit)"
+#        echo "- ✓ ESLint security plugin analysis"
+#        echo "- ✓ Retire.js known vulnerability scanning"
+#        echo "- ✓ Semgrep advanced static analysis"
+#        echo "- ✓ njsscan Node.js security analysis"
+#        echo "- ✓ TruffleHog secret detection"
+#        echo ""
+#        
+#        echo "DAST (Dynamic Application Security Testing):"
+#        echo "- ✓ OWASP ZAP baseline security scan"
+#        echo "- ✓ Lighthouse security audit"
+#        echo "- ✓ Security headers analysis"
+#        echo ""
+#        
+#        echo "All security reports have been generated and published as pipeline artifacts."
+#        echo "Review the detailed reports in the SAST-Reports and DAST-Reports artifacts."
+#        echo "=================================="
+#      displayName: 'Security Testing Summary'
+
+
 # STAGE 2: Docker Image Build and Push (commented out but preserved for future use)
 #- stage: DockerBuildAndPush
 #  displayName: 'Docker Image Build & Publish'
