@@ -5,7 +5,7 @@
 
 name: 'PR_Pipeline_for_ProjectScaleSkill_App'
 
-#trigger: none  # This pipeline is only triggered by pull requests, not direct commits.
+trigger: none  # This pipeline is only triggered by pull requests, not direct commits.
 
 pr:
   branches:
