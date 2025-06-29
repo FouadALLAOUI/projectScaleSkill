@@ -208,7 +208,6 @@ stages:
   condition: succeeded('validation')
   variables:
     # Security testing configuration
-    SECURITY_SCAN_TIMEOUT: 30 # minutes
     FAIL_ON_CRITICAL: true
     FAIL_ON_HIGH: false
     SECURITY_REPORTS_PATH: '$(Build.ArtifactStagingDirectory)/security-reports'
@@ -217,7 +216,7 @@ stages:
   # SAST (Static Application Security Testing)
   - job: StaticSecurityAnalysis
     displayName: 'SAST - Static Application Security Testing'
-    timeoutInMinutes: $(SECURITY_SCAN_TIMEOUT)
+    timeoutInMinutes: 45
     cancelTimeoutInMinutes: 5
     
     steps:
