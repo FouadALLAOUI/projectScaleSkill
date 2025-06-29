@@ -267,8 +267,15 @@ stages:
     - script: |
         echo "##[section]Installing and running Retire.js..."
         npm install -g retire || true
-        retire --js --outputformat json --outputpath $(Build.ArtifactStagingDirectory)/retire-js-report.json . || true
-        retire --js . || echo "Retire.js found vulnerable libraries"
+        
+        echo "##[section]Running Retire.js vulnerability scan with JSON output..."
+        retire --outputformat json --outputpath $(Build.ArtifactStagingDirectory)/retire-js-report.json . || true
+        
+        echo "##[section]Running Retire.js vulnerability scan with default output..."
+        retire . || echo "Retire.js found vulnerable libraries"
+        
+        echo "##[section]Running Retire.js scan for current directory..."
+        retire || echo "Retire.js scan completed"
       displayName: 'Retire.js Vulnerability Scanner'
       continueOnError: true
 
