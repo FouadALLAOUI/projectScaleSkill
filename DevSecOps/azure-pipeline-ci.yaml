@@ -243,11 +243,15 @@ stages:
     # Install and run ESLint Security Plugin
     - script: |
         echo "##[section]Installing ESLint security plugins..."
-        npm install --no-save eslint-plugin-security eslint-plugin-node-security || true
+        npm install --no-save eslint-plugin-security @typescript-eslint/eslint-plugin @typescript-eslint/parser || true
         
-        echo "##[section]Running ESLint security analysis..."
-        npx eslint --ext .js,.jsx,.ts,.tsx --config .eslintrc.json --format json --output-file $(Build.ArtifactStagingDirectory)/eslint-security.json . || true
-        npx eslint --ext .js,.jsx,.ts,.tsx . || echo "ESLint security issues found"
+        echo "##[section]Running ESLint security analysis with dedicated security config..."
+        npx eslint --ext .js,.jsx,.ts,.tsx --config .eslintrc-security.json --format json --output-file $(Build.ArtifactStagingDirectory)/eslint-security.json . || true
+        npx eslint --ext .js,.jsx,.ts,.tsx --config .eslintrc-security.json . || echo "ESLint security issues found"
+        
+        echo "##[section]Running ESLint with standard configuration as fallback..."
+        npx eslint --ext .js,.jsx,.ts,.tsx --format json --output-file $(Build.ArtifactStagingDirectory)/eslint-standard.json . || true
+        npx eslint --ext .js,.jsx,.ts,.tsx . || echo "ESLint analysis completed"
       displayName: 'ESLint Security Analysis'
       continueOnError: true
 
