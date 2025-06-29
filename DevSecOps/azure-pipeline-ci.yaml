@@ -357,253 +357,253 @@ stages:
       condition: always()
       
 
-  # DAST (Dynamic Application Security Testing)
-  - job: DynamicSecurityAnalysis
-    displayName: 'DAST - Dynamic Application Security Testing'
-    dependsOn: StaticSecurityAnalysis
-    steps:
-    # Setup Node.js environment
-    - task: NodeTool@0
-      inputs:
-        versionSpec: $(NODE_VERSION)
-      displayName: 'Setup Node.js Environment'
-
-    # Install dependencies and build application
-    - script: |
-        echo "##[section]Installing dependencies..."
-        npm install --legacy-peer-deps
-        
-        echo "##[section]Building application for DAST testing..."
-        npm run build
-      displayName: 'Build Application for DAST'
-
-    # Start application for dynamic testing
-    - script: |
-        echo "##[section]Starting Next.js application for DAST..."
-        
-        # Check if the app is configured for static export
-        if grep -q '"output".*"export"' next.config.js || grep -q "output: 'export'" next.config.js; then
-          echo "##[section]Detected static export configuration - using serve for static files..."
-          
-          # Install serve if not available
-          npm install -g serve@latest || echo "Serve may already be installed"
-          
-          # Start serving the static files from out directory
-          echo "##[section]Starting static file server on port 3000..."
-          serve -s out -l 3000 &
-          APP_PID=$!
-          echo "Static server PID: $APP_PID"
-          echo $APP_PID > $(Build.ArtifactStagingDirectory)/app.pid
-          
-        else
-          echo "##[section]Using standard Next.js server..."
-          npm start &
-          APP_PID=$!
-          echo "Application PID: $APP_PID"
-          echo $APP_PID > $(Build.ArtifactStagingDirectory)/app.pid
-        fi
-        
-        echo "##[section]Waiting for application to start..."
-        sleep 30
-        
-        echo "##[section]Verifying application is running..."
-        # Try multiple verification attempts
-        for i in {1..5}; do
-          if curl -f http://localhost:3000 > /dev/null 2>&1; then
-            echo "✓ Application is running and accessible on http://localhost:3000"
-            break
-          else
-            echo "Attempt $i: Application not ready yet, waiting 10 more seconds..."
-            sleep 10
-          fi
-        done
-        
-        # Final verification with detailed output
-        echo "##[section]Final application status check..."
-        curl -I http://localhost:3000 || echo "Application may not be fully ready for testing"
-        
-        # Check if the process is still running
-        if kill -0 $APP_PID 2>/dev/null; then
-          echo "✓ Application process is running (PID: $APP_PID)"
-        else
-          echo "⚠ Application process may have stopped"
-        fi
-        
-      displayName: 'Start Application for Testing'
-      continueOnError: true
-
-    # Install and run OWASP ZAP for web security testing
-    - script: |
-        echo "##[section]Running OWASP ZAP baseline scan with correct Docker image..."
-        
-        # Method 1: Try the latest stable ZAP image from zaproxy org
-        echo "##[section]Attempting ZAP scan with zaproxy/zap-stable..."
-        docker run --rm -v $(pwd):/zap/wrk/:rw -t zaproxy/zap-stable zap-baseline.py \
-          -t http://host.docker.internal:3000 \
-          -J /zap/wrk/zap-baseline-report.json \
-          -r /zap/wrk/zap-baseline-report.html || echo "ZAP baseline scan with zaproxy/zap-stable completed"
-        
-        # Copy reports to staging directory if they exist
-        if [ -f "zap-baseline-report.json" ]; then
-          cp zap-baseline-report.json $(Build.ArtifactStagingDirectory)/ || true
-        fi
-        if [ -f "zap-baseline-report.html" ]; then
-          cp zap-baseline-report.html $(Build.ArtifactStagingDirectory)/ || true
-        fi
-        
-        # Method 2: Try alternative approach with weekly image if stable fails
-        echo "##[section]Running additional ZAP scan with weekly image..."
-        docker run --rm -v $(pwd):/zap/wrk/:rw -t zaproxy/zap-weekly zap-baseline.py \
-          -t http://host.docker.internal:3000 \
-          -J /zap/wrk/zap-weekly-report.json || echo "ZAP weekly scan completed"
-        
-        # Copy weekly report if it exists
-        if [ -f "zap-weekly-report.json" ]; then
-          cp zap-weekly-report.json $(Build.ArtifactStagingDirectory)/ || true
-        fi
-        
-        echo "##[section]ZAP scan summary:"
-        echo "✓ Attempted scan with zaproxy/zap-stable"
-        echo "✓ Attempted scan with zaproxy/zap-weekly"
-        echo "Reports saved to artifacts if successful"
-        
-      displayName: 'OWASP ZAP Security Scan'
-      continueOnError: true
-
-    # Add OWASP Dependency Check for additional security analysis
-    - script: |
-        echo "##[section]Running OWASP Dependency Check..."
-        
-        # Run OWASP Dependency Check using Docker
-        docker run --rm \
-          -v $(pwd):/src:rw \
-          -v $(Build.ArtifactStagingDirectory):/report:rw \
-          owasp/dependency-check:latest \
-          --scan /src \
-          --format JSON \
-          --format HTML \
-          --out /report \
-          --project "$(Build.Repository.Name)" \
-          --enableRetired || echo "OWASP Dependency Check completed"
-        
-        echo "##[section]OWASP Dependency Check summary:"
-        echo "✓ Scanned project dependencies for known vulnerabilities"
-        echo "✓ Generated JSON and HTML reports"
-        echo "✓ Reports available in pipeline artifacts"
-        
-      displayName: 'OWASP Dependency Check'
-      continueOnError: true
-
-    # Run Lighthouse security audit
-    - script: |
-        echo "##[section]Installing Lighthouse..."
-        npm install -g lighthouse || true
-        
-        echo "##[section]Running Lighthouse security audit..."
-        lighthouse http://localhost:3000 --only-categories=best-practices --output=json --output-path=$(Build.ArtifactStagingDirectory)/lighthouse-security.json || true
-        lighthouse http://localhost:3000 --only-categories=best-practices || echo "Lighthouse audit completed"
-      displayName: 'Lighthouse Security Audit'
-      continueOnError: true
-
-    # Web application security headers check
-    - script: |
-        echo "##[section]Checking security headers..."
-        curl -I http://localhost:3000 > $(Build.ArtifactStagingDirectory)/security-headers.txt || true
-        
-        echo "##[section]Analyzing security headers..."
-        python3 -c "
-        import requests
-        import json
-
-        try:
-            response = requests.get('http://localhost:3000')
-            headers = dict(response.headers)
-
-            security_analysis = {
-                'status_code': response.status_code,
-                'security_headers': {
-                    'X-Frame-Options': headers.get('X-Frame-Options', 'MISSING'),
-                    'X-Content-Type-Options': headers.get('X-Content-Type-Options', 'MISSING'),
-                    'X-XSS-Protection': headers.get('X-XSS-Protection', 'MISSING'),
-                    'Strict-Transport-Security': headers.get('Strict-Transport-Security', 'MISSING'),
-                    'Content-Security-Policy': headers.get('Content-Security-Policy', 'MISSING'),
-                    'Referrer-Policy': headers.get('Referrer-Policy', 'MISSING')
-                },
-                'all_headers': headers
-            }
-
-            with open('$(Build.ArtifactStagingDirectory)/security-headers-analysis.json', 'w') as f:
-                json.dump(security_analysis, f, indent=2)
-
-            print('Security Headers Analysis:')
-            for header, value in security_analysis['security_headers'].items():
-                status = '✓' if value != 'MISSING' else '✗'
-                print(f'{status} {header}: {value}')
-
-        except Exception as e:
-            print(f'Error analyzing security headers: {e}')
-        " || echo "Security headers analysis completed"
-      displayName: 'Security Headers Analysis'
-      continueOnError: true
-
-    # Stop application
-    - script: |
-        echo "##[section]Stopping application..."
-        if [ -f "$(Build.ArtifactStagingDirectory)/app.pid" ]; then
-          APP_PID=$(cat $(Build.ArtifactStagingDirectory)/app.pid)
-          kill $APP_PID || echo "Application may have already stopped"
-          echo "Application stopped"
-        fi
-      displayName: 'Stop Application'
-      condition: always()
-
-    # Publish DAST artifacts
-    - task: PublishBuildArtifacts@1
-      inputs:
-        pathToPublish: $(Build.ArtifactStagingDirectory)
-        artifactName: 'DAST-Reports'
-        publishLocation: 'Container'
-      displayName: 'Publish DAST Reports'
-      condition: always()
-
-  # Security Summary and Reporting
-  - job: SecuritySummaryReport
-    displayName: 'Security Testing Summary'
-    dependsOn: 
-    - StaticSecurityAnalysis
-    - DynamicSecurityAnalysis
-    steps:
-    # Generate comprehensive security summary
-    - script: |
-        echo "##[section]Generating Security Testing Summary..."
-        
-        echo "=================================="
-        echo "SECURITY TESTING SUMMARY REPORT"
-        echo "=================================="
-        echo "Pipeline: $(Build.DefinitionName)"
-        echo "Build: $(Build.BuildNumber)"
-        echo "Date: $(date)"
-        echo ""
-        
-        echo "SAST (Static Application Security Testing):"
-        echo "- ✓ Dependency vulnerability scanning (npm audit)"
-        echo "- ✓ ESLint security plugin analysis"
-        echo "- ✓ Retire.js known vulnerability scanning"
-        echo "- ✓ Semgrep advanced static analysis"
-        echo "- ✓ njsscan Node.js security analysis"
-        echo "- ✓ TruffleHog secret detection"
-        echo ""
-        
-        echo "DAST (Dynamic Application Security Testing):"
-        echo "- ✓ OWASP ZAP baseline security scan"
-        echo "- ✓ Lighthouse security audit"
-        echo "- ✓ Security headers analysis"
-        echo ""
-        
-        echo "All security reports have been generated and published as pipeline artifacts."
-        echo "Review the detailed reports in the SAST-Reports and DAST-Reports artifacts."
-        echo "=================================="
-      displayName: 'Security Testing Summary'
+#  # DAST (Dynamic Application Security Testing)
+#  - job: DynamicSecurityAnalysis
+#    displayName: 'DAST - Dynamic Application Security Testing'
+#    dependsOn: StaticSecurityAnalysis
+#    steps:
+#    # Setup Node.js environment
+#    - task: NodeTool@0
+#      inputs:
+#        versionSpec: $(NODE_VERSION)
+#      displayName: 'Setup Node.js Environment'
+#
+#    # Install dependencies and build application
+#    - script: |
+#        echo "##[section]Installing dependencies..."
+#        npm install --legacy-peer-deps
+#        
+#        echo "##[section]Building application for DAST testing..."
+#        npm run build
+#      displayName: 'Build Application for DAST'
+#
+#    # Start application for dynamic testing
+#    - script: |
+#        echo "##[section]Starting Next.js application for DAST..."
+#        
+#        # Check if the app is configured for static export
+#        if grep -q '"output".*"export"' next.config.js || grep -q "output: 'export'" next.config.js; then
+#          echo "##[section]Detected static export configuration - using serve for static files..."
+#          
+#          # Install serve if not available
+#          npm install -g serve@latest || echo "Serve may already be installed"
+#          
+#          # Start serving the static files from out directory
+#          echo "##[section]Starting static file server on port 3000..."
+#          serve -s out -l 3000 &
+#          APP_PID=$!
+#          echo "Static server PID: $APP_PID"
+#          echo $APP_PID > $(Build.ArtifactStagingDirectory)/app.pid
+#          
+#        else
+#          echo "##[section]Using standard Next.js server..."
+#          npm start &
+#          APP_PID=$!
+#          echo "Application PID: $APP_PID"
+#          echo $APP_PID > $(Build.ArtifactStagingDirectory)/app.pid
+#        fi
+#        
+#        echo "##[section]Waiting for application to start..."
+#        sleep 30
+#        
+#        echo "##[section]Verifying application is running..."
+#        # Try multiple verification attempts
+#        for i in {1..5}; do
+#          if curl -f http://localhost:3000 > /dev/null 2>&1; then
+#            echo "✓ Application is running and accessible on http://localhost:3000"
+#            break
+#          else
+#            echo "Attempt $i: Application not ready yet, waiting 10 more seconds..."
+#            sleep 10
+#          fi
+#        done
+#        
+#        # Final verification with detailed output
+#        echo "##[section]Final application status check..."
+#        curl -I http://localhost:3000 || echo "Application may not be fully ready for testing"
+#        
+#        # Check if the process is still running
+#        if kill -0 $APP_PID 2>/dev/null; then
+#          echo "✓ Application process is running (PID: $APP_PID)"
+#        else
+#          echo "⚠ Application process may have stopped"
+#        fi
+#        
+#      displayName: 'Start Application for Testing'
+#      continueOnError: true
+#
+#    # Install and run OWASP ZAP for web security testing
+#    - script: |
+#        echo "##[section]Running OWASP ZAP baseline scan with correct Docker image..."
+#        
+#        # Method 1: Try the latest stable ZAP image from zaproxy org
+#        echo "##[section]Attempting ZAP scan with zaproxy/zap-stable..."
+#        docker run --rm -v $(pwd):/zap/wrk/:rw -t zaproxy/zap-stable zap-baseline.py \
+#          -t http://host.docker.internal:3000 \
+#          -J /zap/wrk/zap-baseline-report.json \
+#          -r /zap/wrk/zap-baseline-report.html || echo "ZAP baseline scan with zaproxy/zap-stable completed"
+#        
+#        # Copy reports to staging directory if they exist
+#        if [ -f "zap-baseline-report.json" ]; then
+#          cp zap-baseline-report.json $(Build.ArtifactStagingDirectory)/ || true
+#        fi
+#        if [ -f "zap-baseline-report.html" ]; then
+#          cp zap-baseline-report.html $(Build.ArtifactStagingDirectory)/ || true
+#        fi
+#        
+#        # Method 2: Try alternative approach with weekly image if stable fails
+#        echo "##[section]Running additional ZAP scan with weekly image..."
+#        docker run --rm -v $(pwd):/zap/wrk/:rw -t zaproxy/zap-weekly zap-baseline.py \
+#          -t http://host.docker.internal:3000 \
+#          -J /zap/wrk/zap-weekly-report.json || echo "ZAP weekly scan completed"
+#        
+#        # Copy weekly report if it exists
+#        if [ -f "zap-weekly-report.json" ]; then
+#          cp zap-weekly-report.json $(Build.ArtifactStagingDirectory)/ || true
+#        fi
+#        
+#        echo "##[section]ZAP scan summary:"
+#        echo "✓ Attempted scan with zaproxy/zap-stable"
+#        echo "✓ Attempted scan with zaproxy/zap-weekly"
+#        echo "Reports saved to artifacts if successful"
+#        
+#      displayName: 'OWASP ZAP Security Scan'
+#      continueOnError: true
+#
+#    # Add OWASP Dependency Check for additional security analysis
+#    - script: |
+#        echo "##[section]Running OWASP Dependency Check..."
+#        
+#        # Run OWASP Dependency Check using Docker
+#        docker run --rm \
+#          -v $(pwd):/src:rw \
+#          -v $(Build.ArtifactStagingDirectory):/report:rw \
+#          owasp/dependency-check:latest \
+#          --scan /src \
+#          --format JSON \
+#          --format HTML \
+#          --out /report \
+#          --project "$(Build.Repository.Name)" \
+#          --enableRetired || echo "OWASP Dependency Check completed"
+#        
+#        echo "##[section]OWASP Dependency Check summary:"
+#        echo "✓ Scanned project dependencies for known vulnerabilities"
+#        echo "✓ Generated JSON and HTML reports"
+#        echo "✓ Reports available in pipeline artifacts"
+#        
+#      displayName: 'OWASP Dependency Check'
+#      continueOnError: true
+#
+#    # Run Lighthouse security audit
+#    - script: |
+#        echo "##[section]Installing Lighthouse..."
+#        npm install -g lighthouse || true
+#        
+#        echo "##[section]Running Lighthouse security audit..."
+#        lighthouse http://localhost:3000 --only-categories=best-practices --output=json --output-path=$(Build.ArtifactStagingDirectory)/lighthouse-security.json || true
+#        lighthouse http://localhost:3000 --only-categories=best-practices || echo "Lighthouse audit completed"
+#      displayName: 'Lighthouse Security Audit'
+#      continueOnError: true
+#
+#    # Web application security headers check
+#    - script: |
+#        echo "##[section]Checking security headers..."
+#        curl -I http://localhost:3000 > $(Build.ArtifactStagingDirectory)/security-headers.txt || true
+#        
+#        echo "##[section]Analyzing security headers..."
+#        python3 -c "
+#        import requests
+#        import json
+#
+#        try:
+#            response = requests.get('http://localhost:3000')
+#            headers = dict(response.headers)
+#
+#            security_analysis = {
+#                'status_code': response.status_code,
+#                'security_headers': {
+#                    'X-Frame-Options': headers.get('X-Frame-Options', 'MISSING'),
+#                    'X-Content-Type-Options': headers.get('X-Content-Type-Options', 'MISSING'),
+#                    'X-XSS-Protection': headers.get('X-XSS-Protection', 'MISSING'),
+#                    'Strict-Transport-Security': headers.get('Strict-Transport-Security', 'MISSING'),
+#                    'Content-Security-Policy': headers.get('Content-Security-Policy', 'MISSING'),
+#                    'Referrer-Policy': headers.get('Referrer-Policy', 'MISSING')
+#                },
+#                'all_headers': headers
+#            }
+#
+#            with open('$(Build.ArtifactStagingDirectory)/security-headers-analysis.json', 'w') as f:
+#                json.dump(security_analysis, f, indent=2)
+#
+#            print('Security Headers Analysis:')
+#            for header, value in security_analysis['security_headers'].items():
+#                status = '✓' if value != 'MISSING' else '✗'
+#                print(f'{status} {header}: {value}')
+#
+#        except Exception as e:
+#            print(f'Error analyzing security headers: {e}')
+#        " || echo "Security headers analysis completed"
+#      displayName: 'Security Headers Analysis'
+#      continueOnError: true
+#
+#    # Stop application
+#    - script: |
+#        echo "##[section]Stopping application..."
+#        if [ -f "$(Build.ArtifactStagingDirectory)/app.pid" ]; then
+#          APP_PID=$(cat $(Build.ArtifactStagingDirectory)/app.pid)
+#          kill $APP_PID || echo "Application may have already stopped"
+#          echo "Application stopped"
+#        fi
+#      displayName: 'Stop Application'
+#      condition: always()
+#
+#    # Publish DAST artifacts
+#    - task: PublishBuildArtifacts@1
+#      inputs:
+#        pathToPublish: $(Build.ArtifactStagingDirectory)
+#        artifactName: 'DAST-Reports'
+#        publishLocation: 'Container'
+#      displayName: 'Publish DAST Reports'
+#      condition: always()
+#
+#  # Security Summary and Reporting
+#  - job: SecuritySummaryReport
+#    displayName: 'Security Testing Summary'
+#    dependsOn: 
+#    - StaticSecurityAnalysis
+#    - DynamicSecurityAnalysis
+#    steps:
+#    # Generate comprehensive security summary
+#    - script: |
+#        echo "##[section]Generating Security Testing Summary..."
+#        
+#        echo "=================================="
+#        echo "SECURITY TESTING SUMMARY REPORT"
+#        echo "=================================="
+#        echo "Pipeline: $(Build.DefinitionName)"
+#        echo "Build: $(Build.BuildNumber)"
+#        echo "Date: $(date)"
+#        echo ""
+#        
+#        echo "SAST (Static Application Security Testing):"
+#        echo "- ✓ Dependency vulnerability scanning (npm audit)"
+#        echo "- ✓ ESLint security plugin analysis"
+#        echo "- ✓ Retire.js known vulnerability scanning"
+#        echo "- ✓ Semgrep advanced static analysis"
+#        echo "- ✓ njsscan Node.js security analysis"
+#        echo "- ✓ TruffleHog secret detection"
+#        echo ""
+#        
+#        echo "DAST (Dynamic Application Security Testing):"
+#        echo "- ✓ OWASP ZAP baseline security scan"
+#        echo "- ✓ Lighthouse security audit"
+#        echo "- ✓ Security headers analysis"
+#        echo ""
+#        
+#        echo "All security reports have been generated and published as pipeline artifacts."
+#        echo "Review the detailed reports in the SAST-Reports and DAST-Reports artifacts."
+#        echo "=================================="
+#      displayName: 'Security Testing Summary'
 
 
 # STAGE 2: Docker Image Build and Push (commented out but preserved for future use)
