@@ -2,6 +2,14 @@
 # This pipeline builds, tests, and packages the application for deployment
 # Triggers only manually or from successful PR pipeline completions
 # Reference: https://docs.microsoft.com/azure/devops/pipelines/languages/javascript
+#
+# SECURITY APPROVAL SETUP:
+# To enable security testing approval, create an environment named 'Security-Testing-Environment'
+# in Azure DevOps Project Settings > Environments with the following approvers:
+# - Security team members
+# - DevSecOps engineers
+# - Project administrators
+# Navigate to: Project Settings > Environments > Create Environment > Add Approvals and Checks
 
 name: 'CI_Pipeline_for_ProjectScaleSkill_App'
 
@@ -203,20 +211,41 @@ stages:
 
 # STAGE 2: Security Testing (SAST & DAST)
 - stage: SecurityTesting
-  #approval: true # Need approval to run this stage
-  #approvalOptions:
-  #  requiredApprovers:
-  #    - 'admin'
-  #    - 'security-admin'
-  #    - 'security-reviewer'
-  #    - 'security-approver'
-  #    - 'security-tester'
   displayName: 'Security Testing (SAST & DAST)'
   dependsOn: validation
+  condition: succeeded('validation')
   jobs:
+  
+  # Security Approval Gate
+  - deployment: SecurityApproval
+    displayName: 'Security Testing Approval Gate'
+    environment: 'Security-Testing-Environment'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - script: |
+              echo "##[section]Security Testing Approval Granted"
+              echo "This stage will run comprehensive security analysis including:"
+              echo "- Static Application Security Testing (SAST)"
+              echo "- Dependency vulnerability scanning"
+              echo "- ESLint security analysis"
+              echo "- Retire.js vulnerability scanning"
+              echo "- Semgrep static analysis"
+              echo "- Secret detection"
+              echo ""
+              echo "Please ensure the following before approving:"
+              echo "✓ Code changes have been reviewed"
+              echo "✓ No sensitive data is present in the codebase"
+              echo "✓ All development dependencies are from trusted sources"
+              echo "✓ Security team has been notified if required"
+            displayName: 'Security Testing Approval Information'
+  
   # SAST (Static Application Security Testing)
   - job: StaticSecurityAnalysis
     displayName: 'SAST - Static Application Security Testing'
+    dependsOn: SecurityApproval
+    condition: succeeded('SecurityApproval')
     steps:
     # Setup Node.js environment for security tools
     - task: NodeTool@0
