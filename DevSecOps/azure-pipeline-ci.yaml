@@ -218,17 +218,21 @@ stages:
 
     # Install dependencies for security scanning
     - script: |
-        echo "##[section]Installing dependencies for security analysis..."
-        npm install --legacy-peer-deps --production
-      displayName: 'Install Production Dependencies'
+        echo "##[section]Installing all dependencies for comprehensive security analysis..."
+        npm install --legacy-peer-deps
+      displayName: 'Install All Dependencies for Security Analysis'
       
     # Enhanced dependency vulnerability scanning
     - script: |
         echo "##[section]Running enhanced dependency vulnerability scan..."
-        npm audit --production --audit-level=low --json > $(Build.ArtifactStagingDirectory)/npm-audit-detailed.json || true
-        npm audit --production --audit-level=moderate || echo "Moderate vulnerabilities found"
-        npm audit --production --audit-level=high || echo "High vulnerabilities found"
-        npm audit --production --audit-level=critical || echo "Critical vulnerabilities found"
+        npm audit --audit-level=low --json > $(Build.ArtifactStagingDirectory)/npm-audit-detailed.json || true
+        npm audit --audit-level=moderate || echo "Moderate vulnerabilities found"
+        npm audit --audit-level=high || echo "High vulnerabilities found"
+        npm audit --audit-level=critical || echo "Critical vulnerabilities found"
+        
+        echo "##[section]Running production-only vulnerability scan..."
+        npm audit --production --audit-level=low --json > $(Build.ArtifactStagingDirectory)/npm-audit-production.json || true
+        npm audit --production || echo "Production vulnerabilities found"
         
         echo "##[section]Checking for outdated packages..."
         npm outdated --json > $(Build.ArtifactStagingDirectory)/npm-outdated.json || true
@@ -236,7 +240,11 @@ stages:
         
         echo "##[section]Listing all dependencies for security review..."
         npm list --depth=0 --json > $(Build.ArtifactStagingDirectory)/npm-dependencies.json || true
-        npm list --depth=0
+        npm list --depth=0 || echo "Dependencies listed with warnings"
+        
+        echo "##[section]Listing production dependencies only..."
+        npm list --depth=0 --production --json > $(Build.ArtifactStagingDirectory)/npm-dependencies-production.json || true
+        npm list --depth=0 --production || echo "Production dependencies listed"
       displayName: 'Enhanced Dependency Security Scan'
       continueOnError: true
 
