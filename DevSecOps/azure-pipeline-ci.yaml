@@ -350,67 +350,21 @@ stages:
 
     # Run njsscan for Node.js specific security analysis
     - script: |
-        echo "##[section]Installing njsscan for Node.js security analysis..."
+        echo "##[section]Installing and running njsscan..."
+        python3 -m pip install njsscan || echo "Failed to install njsscan"
         
-        # Try installing njsscan via pip
-        if python3 -m pip --version > /dev/null 2>&1; then
-          echo "Installing njsscan via pip..."
-          python3 -m pip install njsscan --user || echo "Failed to install njsscan via pip"
-        elif command -v pip3 > /dev/null 2>&1; then
-          echo "Installing njsscan via pip3..."
-          pip3 install njsscan --user || echo "Failed to install njsscan via pip3"
-        elif command -v pip > /dev/null 2>&1; then
-          echo "Installing njsscan via pip..."
-          pip install njsscan --user || echo "Failed to install njsscan via pip"
-        else
-          echo "No pip found, attempting alternative installation..."
-          curl -s https://bootstrap.pypa.io/get-pip.py | python3 || echo "Failed to install pip"
-          python3 -m pip install njsscan --user || echo "Failed to install njsscan"
-        fi
-        
-        # Check if njsscan is available and run analysis
-        if command -v njsscan > /dev/null 2>&1; then
-          echo "##[section]Running njsscan analysis..."
-          njsscan --version || echo "njsscan version check failed"
-          njsscan --json --output $(Build.ArtifactStagingDirectory)/njsscan-report.json . || true
-          njsscan . || echo "njsscan analysis completed with findings"
-        else
-          echo "##[warning]njsscan installation failed. Skipping njsscan analysis."
-          echo "{\"error\": \"njsscan not available\"}" > $(Build.ArtifactStagingDirectory)/njsscan-report.json
-        fi
+        njsscan --json --output $(Build.ArtifactStagingDirectory)/njsscan-report.json . || true
+        njsscan . || echo "njsscan analysis completed with findings"
       displayName: 'njsscan Node.js Security Analysis'
       continueOnError: true
 
     # Secret detection with TruffleHog
     - script: |
-        echo "##[section]Installing TruffleHog for secret detection..."
+        echo "##[section]Installing and running TruffleHog for secret detection..."
+        python3 -m pip install truffleHog || echo "Failed to install truffleHog"
         
-        # Try installing TruffleHog via pip
-        if python3 -m pip --version > /dev/null 2>&1; then
-          echo "Installing TruffleHog via pip..."
-          python3 -m pip install truffleHog --user || echo "Failed to install truffleHog via pip"
-        elif command -v pip3 > /dev/null 2>&1; then
-          echo "Installing TruffleHog via pip3..."
-          pip3 install truffleHog --user || echo "Failed to install truffleHog via pip3"
-        elif command -v pip > /dev/null 2>&1; then
-          echo "Installing TruffleHog via pip..."
-          pip install truffleHog --user || echo "Failed to install truffleHog via pip"
-        else
-          echo "No pip found, attempting alternative installation..."
-          curl -s https://bootstrap.pypa.io/get-pip.py | python3 || echo "Failed to install pip"
-          python3 -m pip install truffleHog --user || echo "Failed to install truffleHog"
-        fi
-        
-        # Check if TruffleHog is available and run analysis
-        if command -v trufflehog > /dev/null 2>&1; then
-          echo "##[section]Running TruffleHog secret detection..."
-          trufflehog --version || echo "TruffleHog version check failed"
-          trufflehog --json --output $(Build.ArtifactStagingDirectory)/trufflehog-report.json . || true
-          trufflehog . || echo "TruffleHog scan completed"
-        else
-          echo "##[warning]TruffleHog installation failed. Skipping secret detection."
-          echo "{\"error\": \"TruffleHog not available\"}" > $(Build.ArtifactStagingDirectory)/trufflehog-report.json
-        fi
+        trufflehog --json --output $(Build.ArtifactStagingDirectory)/trufflehog-report.json . || true
+        trufflehog . || echo "TruffleHog scan completed"
       displayName: 'Secret Detection with TruffleHog'
       continueOnError: true
 
