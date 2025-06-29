@@ -289,62 +289,12 @@ stages:
 
     # Install and run Semgrep for advanced static analysis
     - script: |
-        echo "##[section]Installing Semgrep with multiple fallback methods..."
+        echo "##[section]Installing and running Semgrep..."
+        python3 -m pip install semgrep || echo "Failed to install semgrep"
         
-        # Method 1: Try to install pip if not available
-        if ! python3 -m pip --version > /dev/null 2>&1; then
-          echo "Pip not found, attempting to install pip..."
-          curl -s https://bootstrap.pypa.io/get-pip.py | python3 || echo "Failed to install pip via curl"
-          
-          # Try apt-get for Ubuntu/Debian systems
-          sudo apt-get update > /dev/null 2>&1 && sudo apt-get install -y python3-pip > /dev/null 2>&1 || echo "Failed to install pip via apt-get"
-          
-          # Try yum for CentOS/RHEL systems
-          sudo yum install -y python3-pip > /dev/null 2>&1 || echo "Failed to install pip via yum"
-        fi
-        
-        # Method 2: Try installing Semgrep via pip
-        if python3 -m pip --version > /dev/null 2>&1; then
-          echo "Installing Semgrep via pip..."
-          python3 -m pip install semgrep --user || echo "Failed to install semgrep via pip"
-        fi
-        
-        # Method 3: Try installing via direct script download if pip failed
-        if ! command -v semgrep > /dev/null 2>&1; then
-          echo "Attempting direct Semgrep installation..."
-          curl -fsSL https://semgrep.dev/install | bash || echo "Failed to install semgrep via direct script"
-        fi
-        
-        # Method 4: Try npm package as fallback
-        if ! command -v semgrep > /dev/null 2>&1; then
-          echo "Attempting Semgrep installation via npm..."
-          npm install -g @semgrep/cli || echo "Failed to install semgrep via npm"
-        fi
-        
-        # Check if Semgrep is now available
-        if command -v semgrep > /dev/null 2>&1; then
-          echo "##[section]Semgrep successfully installed, running analysis..."
-          semgrep --version
-          
-          # Run Semgrep with JavaScript/TypeScript rulesets
-          echo "##[section]Running Semgrep auto-detection scan..."
-          semgrep --config=auto --json --output=$(Build.ArtifactStagingDirectory)/semgrep-report.json . || true
-          
-          echo "##[section]Running Semgrep with specific rulesets..."
-          semgrep --config=p/javascript --config=p/typescript --config=p/react --config=p/nextjs . || echo "Semgrep analysis completed with findings"
-          
-          echo "##[section]Running additional security-focused Semgrep rules..."
-          semgrep --config=p/security-audit --config=p/secrets . || echo "Security audit completed"
-        else
-          echo "##[warning]Semgrep installation failed with all methods. Skipping Semgrep analysis."
-          echo "Available package managers and tools:"
-          command -v python3 && python3 --version || echo "Python3 not found"
-          command -v pip && pip --version || echo "pip not found"
-          command -v pip3 && pip3 --version || echo "pip3 not found"
-          command -v npm && npm --version || echo "npm not found"
-          command -v curl && curl --version | head -1 || echo "curl not found"
-          echo "{\"error\": \"Semgrep not available\"}" > $(Build.ArtifactStagingDirectory)/semgrep-report.json
-        fi
+        # Run Semgrep with JavaScript/TypeScript rulesets
+        semgrep --config=auto --json --output=$(Build.ArtifactStagingDirectory)/semgrep-report.json . || true
+        semgrep --config=p/javascript --config=p/typescript --config=p/react --config=p/nextjs . || echo "Semgrep analysis completed with findings"
       displayName: 'Semgrep Static Analysis'
       continueOnError: true
 
