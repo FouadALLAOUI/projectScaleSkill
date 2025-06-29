@@ -25,6 +25,8 @@ variables:
     value: 'DevAppScaleSkill-ServiceConnection'
   - name: AZURE_WEBAPP_NAME
     value: 'scaleskilldev'  # Replace with your Web App name
+  - name: RG_NAME
+    value: 'DevScaleSkill'
 
 stages:
 - stage: Deploy
